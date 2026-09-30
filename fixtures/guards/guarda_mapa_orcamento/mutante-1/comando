@@ -1,0 +1,1 @@
+bash "$ROOT/guards/door-guard.sh"

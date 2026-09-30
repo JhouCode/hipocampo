@@ -1,0 +1,1 @@
+MEM_ESPELHO=memoria bash "$ROOT/guards/memory-guards.sh" --tree

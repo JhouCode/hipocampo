@@ -1,0 +1,28 @@
+evento,comando,n,chars_total,mediana,max,persistidos
+SessionStart,cat <YOUR_FOLDER>/docs/mesa/BASTAO.m,80,4482556,42180,106982,0
+UserPromptSubmit,mapa-hook.sh --parte 1,437,2359537,4375,9113,0
+PostToolUse,oraculo.py --evento,227,1685126,8300,15746,0
+UserPromptSubmit,mapa-hook.sh --parte 3,145,1191949,8483,8903,0
+PostToolUse,gatilho.py --evento,1030,949830,583,10034,0
+UserPromptSubmit,mapa-hook.sh --parte 2,145,945612,7158,8783,0
+SessionStart,mapa-hook.sh --parte 1,112,945501,8590,9113,0
+SessionStart,mapa-hook.sh --parte 3,112,903954,8518,8946,0
+UserPromptSubmit,oraculo.py,91,804654,6822,21177,0
+SessionStart,mapa-hook.sh --parte 2,112,713453,6649,8935,0
+PreToolUse,gatilho.py --evento,744,707890,944,2098,0
+UserPromptSubmit,mapa-hook.sh --parte 5,91,643243,7161,7297,0
+SessionStart,mapa-hook.sh --parte 5,81,586269,7297,7297,0
+UserPromptSubmit,mapa-hook.sh --parte 4,142,419185,1114,6372,0
+UserPromptSubmit,vizinhos-hook.py,557,318951,552,1084,0
+SessionStart,mapa-hook.sh --parte 4,109,248068,1114,6372,0
+PreToolUse,lab-only-production-guard,498,232880,472,486,0
+UserPromptSubmit,mapa-hook.sh,24,157523,7465,17422,0
+Stop,gatilho.py --evento,59,80964,871,9420,0
+UserPromptSubmit,contexto-medir.py --devolver,34,64452,1303,4443,0
+PostToolUse,guarda-ja-existe.py --evento,17,13284,716,1271,0
+UserPromptSubmit,sonda-hook.sh,2,10050,5025,5025,0
+PostToolUse,janela-teto.py,20,9241,384,1163,0
+SessionStart,memory-cap-probe.py --hook 2,60,8820,147,147,0
+PostToolUse,horizonte.py,15,8127,540,558,0
+PostToolUse,mapa-orcamento-hook.sh,1,453,453,453,0
+PostToolUse,sonda-posttooluse.sh,1,210,210,210,0

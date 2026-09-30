@@ -1,0 +1,1 @@
+Entry over the per-line ceiling: the gloss of [4] copies the body and passes 80 bytes. Expected detail line: `index line with N B (ceiling 80 per line): [4]`.

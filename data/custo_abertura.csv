@@ -1,0 +1,5 @@
+fase,sessoes_novas,abertura_mediana_chars,abertura_R_llm,sessoes_com_2+_msgs_antes_da_1a_ferramenta,msgs_dele,msgs_recarga_regex,recarga_pct
+F0 before,9,328,2,1,684,31,4.5
+F1 construction,44,285.0,17,1,1278,42,3.3
+F2 consolidated,34,168.0,2,1,699,2,0.3
+F3 window+hipocampo,30,165.0,3,2,719,9,1.3

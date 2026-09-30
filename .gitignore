@@ -1,0 +1,4 @@
+.private-terms
+hipocampo.conf
+__pycache__/
+*.pyc

@@ -1,0 +1,1 @@
+Transient state in the recall key: the description of `reference_migration_checklist.md` says PENDING -- a state that rots, in the field meant for the subject. Expected detail line: `reference_migration_checklist.md -> PENDING`.

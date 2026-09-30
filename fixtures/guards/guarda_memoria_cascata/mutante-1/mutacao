@@ -1,0 +1,1 @@
+A second case was added to `feedback_guard_must_fail` without bumping its `prova:` count (it still says `prova: 1`, two cases point back). Expected detail line: `feedback_guard_must_fail: ... prova: 1 ... 2 ...`.

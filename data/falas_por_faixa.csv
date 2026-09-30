@@ -1,0 +1,5 @@
+faixa_preTokens,eventos,falas,citadas,literais,evaporadas,sem_assinatura,evaporadas_pct,postTokens_mediana,resumo_chars_mediana
+0k-300k,9,81,62,0,1,18,1.2,16763,12699
+300k-500k,61,418,305,3,26,84,6.2,20054,17011
+500k-800k,24,555,385,3,80,87,14.4,19924.0,17559.5
+800k-infk,9,250,165,2,34,49,13.6,21600,17559

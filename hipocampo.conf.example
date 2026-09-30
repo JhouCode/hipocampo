@@ -1,0 +1,20 @@
+# hipocampo.conf -- copy to `hipocampo.conf` (same folder) and edit. Every key is optional:
+# the default is shown commented. An environment variable with the same name wins over this file.
+# The article writes these paths as <YOUR_FOLDER>; this file is where <YOUR_FOLDER> becomes real.
+
+# The repository that holds docs/ and scripts/ (default: this checkout).
+# HIPO_REPO=~/hipocampo
+
+# The directory you open Claude Code sessions from. Claude Code names the project store after it
+# (every '/' and '.' becomes '-'), and the native MEMORY.md lives inside that store.
+# HIPO_WORKDIR=~/my-project
+
+# Claude Code home, session store, native memory folder and settings file.
+# HIPO_CLAUDE_DIR=~/.claude
+# HIPO_PROJECT_DIR=~/.claude/projects/<slug of HIPO_WORKDIR>
+# HIPO_MEMORY_DIR=~/.claude/projects/<slug of HIPO_WORKDIR>/memory
+# HIPO_SETTINGS=~/.claude/settings.json
+
+# Scratch state of the hooks (turn counters, locks) and hook logs.
+# HIPO_STATE_DIR=/tmp/hipocampo
+# HIPO_LOG_DIR=~/.claude

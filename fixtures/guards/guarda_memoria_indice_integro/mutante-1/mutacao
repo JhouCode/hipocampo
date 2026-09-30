@@ -1,0 +1,1 @@
+Dead citation: the index cites [9], and no memory carries `id: 9`. Expected detail line: `dead citation in the index: [9] resolves to no memory`. Born from the control of this guard.

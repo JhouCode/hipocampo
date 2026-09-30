@@ -1,0 +1,13 @@
+marco,descricao,lado,req,sessoes,ctx_mediana,ctx_p90,out_mediana,cache_read_pct,abertura_n,abertura_mediana
+2026-08-13,mapa-hook.sh (map loaded by a hook),before,10598,21,391770.0,675829,748.0,98.64,0,
+2026-08-13,mapa-hook.sh (map loaded by a hook),after,35964,151,288924.0,610168,732.0,98.3,12,75653.5
+2026-08-21,CLAUDE.md -35% + memory source in the trigger,before,22389,57,368209,624675,740,98.79,0,
+2026-08-21,CLAUDE.md -35% + memory source in the trigger,after,24173,116,263465,640474,729,97.95,12,75653.5
+2026-08-27,"citation index [N] (index 21,319->16,075 units)",before,29826,85,357065.0,633627,753.0,98.7,2,113478.0
+2026-08-27,"citation index [N] (index 21,319->16,075 units)",after,16736,90,246462.5,621921,706.0,97.7,10,75396.0
+2026-09-18,cut of the fixed overhead (skills/plugins),before,36709,131,360969,657002,750,98.46,2,113478.0
+2026-09-18,cut of the fixed overhead (skills/plugins),after,9853,42,210343,328671,683,97.97,10,75396.0
+2026-09-19,janela-teto.py (context-window warning),before,37591,139,357252,653938,751,98.46,2,113478.0
+2026-09-19,janela-teto.py (context-window warning),after,8971,36,208280,318025,668,97.89,10,75396.0
+2026-09-23,60/100 tool-call counter + HIPOCAMPO.md,before,42220,152,330794.5,645018,740.0,98.45,2,113478.0
+2026-09-23,60/100 tool-call counter + HIPOCAMPO.md,after,4342,24,200819.0,303535,682.5,97.27,10,75396.0

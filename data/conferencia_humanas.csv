@@ -1,0 +1,11 @@
+metrica,n,mediana_chars,media_chars,p90_chars
+"operator messages (no dedup, per file)",4129,91,316,546
+operator messages (dedup by timestamp+text),3153,93,325,561
+September (dedup),1256,80.0,347,421
+active days (main request) 2026-07-31..2026-09-29,54,,,
+days with an operator message,54,,,
+transcript files born in September (all),93,,,
+  of which with >=1 request of their own,81,,,
+SessionStart:resume events in September,28,,,
+  distinct files that received a resume in September,8,,,
+resumed: born before 2026-09-01 with a request in September,3,,,

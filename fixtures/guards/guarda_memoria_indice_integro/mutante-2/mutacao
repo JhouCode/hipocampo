@@ -1,0 +1,1 @@
+Orphan memory: `project_web_app_rate_limit.md` (id 6) exists in the store and in the mirror, and the index never cites it -- so it never loads. Expected detail line: `ORPHAN memory (never loads, and nothing accuses it): project_web_app_rate_limit.md`.

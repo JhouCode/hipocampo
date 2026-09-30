@@ -1,0 +1,4 @@
+THE HOOK EMITS SOMETHING ELSE.
+The `cat` of SessionStart:compact now emits BASTAO_REGRAS.md; the BASTAO.md on disk is the
+control's, GOOD. A guard that read the baton's path would stay green here; this one starts from
+the hook and judges what it delivers.

@@ -1,0 +1,5 @@
+fase,msgs_dele,C_llm,R_llm,F_llm,C_llm_pct,R_llm_pct,F_llm_pct
+F0 before,684,41,27,7,6.0,3.9,1.0
+F1 construction,1278,124,75,21,9.7,5.9,1.6
+F2 consolidated,699,29,6,15,4.1,0.9,2.1
+F3 window+hipocampo,707,26,11,31,3.7,1.6,4.4

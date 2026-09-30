@@ -1,0 +1,66 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 1",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 2",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 3",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 4",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "<YOUR_FOLDER>/scripts/contexto-medir.py --devolver",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 5",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 <YOUR_FOLDER>/scripts/memory-cap-probe.py --hook 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<YOUR_FOLDER>/scripts/contexto-medir.py",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "cat <YOUR_FOLDER>/docs/mesa/BASTAO.md",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

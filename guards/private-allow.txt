@@ -1,0 +1,9 @@
+# Spans that are public on purpose. One regex per line, case-insensitive, cleared from the line
+# before check-private searches it.
+github\.com/JhouCode/hipocampo
+JhouCode/hipocampo
+https://ksmit\.com\.br/(en/)?blog/hipocampo
+noreply@anthropic\.com
+fixture@local
+Copyright \(c\) 2026 Jhonatan Viana
+[A-Za-z0-9._%+-]+@example\.com

@@ -1,0 +1,3 @@
+THE BATON'S `cat` ONLY IN PostCompact.
+The command leaves SessionStart:compact and stays only in PostCompact, which emits and never
+delivers on automatic compaction (see docs/CONTEXTO.md). The baton on disk is the control's, GOOD.

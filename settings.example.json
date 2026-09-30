@@ -1,0 +1,76 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 1", "timeout": 10 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 2", "timeout": 10 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 3", "timeout": 10 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/contexto-medir.py --devolver", "timeout": 20 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/oraculo.py", "timeout": 10 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/vizinhos-hook.py", "timeout": 10 }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 1", "timeout": 10 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 2", "timeout": 10 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 3", "timeout": 10 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/contexto-medir.py --devolver", "timeout": 20 },
+          { "type": "command", "command": "python3 <YOUR_FOLDER>/scripts/bastao-entrega.py --emitir <YOUR_FOLDER>/docs/mesa/BASTAO.md", "timeout": 10 }
+        ]
+      },
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 <YOUR_FOLDER>/scripts/memory-cap-probe.py --hook 2>/dev/null || true", "timeout": 10 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|Bash",
+        "hooks": [
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/gatilho.py --evento post-tool", "timeout": 10 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/oraculo.py --evento post-tool", "timeout": 10 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/horizonte.py" },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/guarda-ja-existe.py --evento post-tool", "timeout": 10 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/mapa-orcamento-hook.sh", "timeout": 20 },
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/janela-teto.py", "timeout": 5 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/gatilho.py --evento stop", "timeout": 10 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/guarda-crase.py" }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|Bash",
+        "hooks": [
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/gatilho.py --evento pre-tool", "timeout": 10 }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "<YOUR_FOLDER>/scripts/contexto-medir.py", "timeout": 30 },
+          { "type": "command", "command": "cat <YOUR_FOLDER>/docs/mesa/BASTAO.md", "timeout": 5 }
+        ]
+      }
+    ]
+  },
+  "autoCompactWindow": 380000
+}

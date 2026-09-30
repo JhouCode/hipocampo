@@ -1,0 +1,5 @@
+THE HEAD BACK ON TOP.
+The pointer line of the control is replaced by the fixed head of the baton (the text that
+now lives in docs/mesa/BASTAO_REGRAS.md, from its HTML comment on): the file as it was before the
+head moved out, with the live state of the control after it. The 2,000-unit preview ends inside
+the head and *Updated: stays out.

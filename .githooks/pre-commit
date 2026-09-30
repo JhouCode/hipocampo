@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# pre-commit of THIS repository: the method applied to itself.
+#   1. check-private  -- no private path, host, name or code leaves in a commit;
+#   2. every .py compiles and every .sh parses;
+#   3. every memory guard is proven again on its fixtures (control green, mutants red);
+#   4. the revolving door of the map (guards/door-guard.sh).
+# Enable once per clone:  git config core.hooksPath .githooks
+set -uo pipefail
+ROOT="$(git rev-parse --show-toplevel)" || exit 2
+cd "$ROOT" || exit 2
+rc=0
+python3 guards/check-private.py || rc=1
+bad=0
+while IFS= read -r f; do
+  case "$f" in
+    *.py) python3 -m py_compile "$f" 2>/dev/null || { echo "✗ does not compile: $f"; bad=1; } ;;
+    *.sh|.githooks/*) bash -n "$f" 2>/dev/null || { echo "✗ does not parse: $f"; bad=1; } ;;
+  esac
+done < <(git ls-files -co --exclude-standard)
+[ "$bad" = 0 ] && echo "✓ syntax: every .py compiles, every .sh parses" || rc=1
+bash guards/prove-fixture.sh --todas || rc=1
+#   4. the revolving door: the resident map stays inside its slice budget (tree + settings.example.json, no history; ~20 s)
+bash guards/door-guard.sh || rc=1
+exit "$rc"
