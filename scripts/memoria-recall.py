@@ -26,6 +26,18 @@ POPULATION -- read before quoting any number from here
   separates `live` (the file exists now) from `historical` (the name was cited, the file no longer
   exists), and declares the horizon of the transcripts.
 
+INJECTED RECALL -- the other half, and its control on the same channel
+  The same pass reads the attachments the runtime writes into the transcript. The index arrives as
+  an `instructions` attachment whose file is `MEMORY.md` (type `AutoMem`). A memory file that
+  arrived through that channel, or as a nested memory, would be an injected recall.
+    A zero is only printed AFTER the count of index deliveries, and only if that count is above
+  zero: if the detector never saw the index arrive, it cannot tell a blind scan from a real zero,
+  so it says the channel was not seen instead. Older runtimes did not record the index delivery.
+    Two attachments carry a memory file and are NOT recall: `file`, the runtime re-sending a file
+  that was read before a compaction, and `edited_text_file`, a snippet sent when an open file
+  changes on disk. Both are reported apart, each with its origin: opened or written before (in
+  any transcript, by timestamp) or no opening found.
+
 PATHS
   The memory folder is HIPO_MEMORY_DIR and the transcript store is the folder that holds
   HIPO_PROJECT_DIR (every project store next to it, as Claude Code lays them out); both come from
@@ -36,6 +48,7 @@ USAGE
   memoria-recall.py                report
   memoria-recall.py --nunca        only the live memories with zero recall
   memoria-recall.py --json         raw data
+  memoria-recall.py --injecao      only the injection side: index channel, injected recall, re-deliveries
   memoria-recall.py --selftest     proves the predicates, with a positive AND a negative control
 """
 import json, os, re, sys
@@ -93,6 +106,10 @@ def toques(linha):
         r = json.loads(linha)
     except Exception:
         return None  # None != [] -- an unreadable line is a DEFECT, not an absence
+    return _blocos(r)
+
+
+def _blocos(r):
     msg = r.get("message") or {}
     conteudo = msg.get("content")
     if not isinstance(conteudo, list):
@@ -131,31 +148,98 @@ def alvos(d):
     return fora
 
 
+def _mem_nome(path):
+    """The memory name if `path` is a file of a memory folder (`.../memory/<name>.md`), else None.
+    The index itself comes back as "MEMORY"."""
+    m = re.search(r"/memory/([^/]+)\.md$", str(path or ""))
+    return m.group(1) if m else None
+
+
 def varre(raiz=PROJETOS):
     leitura, escrita = defaultdict(int), defaultdict(int)
     sessoes, ultimo = defaultdict(set), {}
     n_linhas = n_ilegiveis = n_arq = 0
+    abertura_ts = defaultdict(list)      # name -> timestamps of every opening or write
+    indice, tr_indice, injetada, reentrega = 0, set(), [], {}
     for jl in sorted(raiz.glob("*/*.jsonl")):
         n_arq += 1
         sid = jl.stem
         ts = datetime.fromtimestamp(jl.stat().st_mtime, timezone.utc).date().isoformat()
         for linha in jl.open(errors="replace"):
             n_linhas += 1
-            ts_use = toques(linha)
-            if ts_use is None:
+            try:
+                r = json.loads(linha)
+            except Exception:
                 n_ilegiveis += 1
                 continue
-            for d in ts_use:
+            if not isinstance(r, dict):
+                continue
+            quando = r.get("timestamp") or ""
+            if r.get("type") == "attachment":
+                a = r.get("attachment") or {}
+                tipo = a.get("type")
+                if tipo == "instructions":
+                    for f in a.get("files") or []:
+                        n = _mem_nome(f.get("path"))
+                        if n == "MEMORY":
+                            indice += 1
+                            tr_indice.add(sid)
+                        elif n:
+                            injetada.append((sid, quando, tipo, n))
+                elif tipo == "nested_memory":
+                    n = _mem_nome(a.get("path"))
+                    if n and n != "MEMORY":
+                        injetada.append((sid, quando, tipo, n))
+                elif tipo in ("file", "edited_text_file"):
+                    n = _mem_nome(a.get("filename"))
+                    if n and n != "MEMORY":
+                        # a resumed transcript copies the lines of its parent: one event, two files
+                        reentrega.setdefault(r.get("uuid") or (quando, tipo, n), (sid, quando, tipo, n))
+                continue
+            for d in _blocos(r):
                 for nome, escreveu in alvos(d):
+                    abertura_ts[nome].append(quando)
                     if escreveu:
                         escrita[nome] += 1
                     else:
                         leitura[nome] += 1
                         sessoes[nome].add(sid)
                         ultimo[nome] = max(ultimo.get(nome, ""), ts)
+    reent = []
+    for sid, quando, tipo, n in reentrega.values():
+        antes = any(t and quando and t <= quando for t in abertura_ts.get(n, ()))
+        reent.append(dict(sid=sid, ts=quando, tipo=tipo, nome=n, aberta_antes=antes))
+    canal = dict(indice=indice, transcripts_com_indice=len(tr_indice),
+                 injetadas=[dict(sid=a, ts=b, tipo=c, nome=d) for a, b, c, d in injetada],
+                 reentregas=reent)
     return dict(leitura=dict(leitura), escrita=dict(escrita),
-                sessoes={k: len(v) for k, v in sessoes.items()}, ultimo=ultimo,
+                sessoes={k: len(v) for k, v in sessoes.items()}, ultimo=ultimo, canal=canal,
                 _pop=dict(arquivos=n_arq, linhas=n_linhas, ilegiveis=n_ilegiveis))
+
+
+def relatorio_canal(c, n_arq):
+    """The injection side. The index count comes FIRST; without it there is no zero to print."""
+    out = [f"INDEX CHANNEL (control) · the index (MEMORY.md, attachment `instructions`) arrived "
+           f"{c['indice']} time(s), in {c['transcripts_com_indice']} of {n_arq} transcripts"]
+    inj = c["injetadas"]
+    if c["indice"] == 0 and not inj:
+        out.append("INJECTED RECALL · NOT MEASURED: the detector never saw the index arrive, so it "
+                   "cannot tell a blind scan from a real zero (older runtimes did not record it)")
+    else:
+        out.append(f"INJECTED RECALL · {len(inj)} memory file(s) arrived through the channel that "
+                   f"delivers the index, or as a nested memory")
+        for x in inj[:20]:
+            out.append(f"  ⚠️  {x['ts']} · {x['tipo']} · {x['nome']} · {x['sid']}")
+    re_ = c["reentregas"]
+    comp = sum(1 for x in re_ if x["tipo"] == "file")
+    mud = len(re_) - comp
+    antes = sum(1 for x in re_ if x["aberta_antes"])
+    out.append(f"RE-DELIVERY (not recall) · {len(re_)} memory file(s) sent again by the runtime: "
+               f"{comp} after a compaction (`file`), {mud} on change (`edited_text_file`) · "
+               f"opened or written before: {antes} · no opening found: {len(re_) - antes}")
+    for x in [x for x in re_ if not x["aberta_antes"]][:10]:
+        out.append(f"  no opening found: {x['ts']} · {x['tipo']} · {x['nome']} · {x['sid']}")
+    return out
 
 
 def relatorio(dados, so_nunca=False):
@@ -173,6 +257,8 @@ def relatorio(dados, so_nunca=False):
                f"{p['ilegiveis']} unreadable · live store: {len(v)}")
     if p["ilegiveis"]:
         out.append(f"⚠️  {p['ilegiveis']} unreadable lines -- the number below is a FLOOR, not a total")
+    out.append("")
+    out += relatorio_canal(dados["canal"], p["arquivos"])
     out.append("")
     out.append(f"RECALL · {len(lidas)} of {len(v)} live memories were opened at least once "
                f"({100*len(lidas)/len(v):.0f}%) · {len(nunca)} NEVER")
@@ -269,6 +355,49 @@ def selftest():
     # visible); an EXISTING folder with no memory is what this control exists to catch.
     _t(len(vivas()) > 0, "absence control · the memory store is not empty", f,
        None if MEMORIA.is_dir() else "the memory folder " + str(MEMORIA) + " (absent)")
+    # THE INJECTION SIDE -- synthetic transcripts, so these cases always run
+    import tempfile
+    def _transcript(raiz, nome, linhas):
+        p = Path(raiz) / "proj"
+        p.mkdir(parents=True, exist_ok=True)
+        (p / (nome + ".jsonl")).write_text("\n".join(json.dumps(x) for x in linhas) + "\n")
+    mdir = "/fixture/.claude/projects/-fixture-proj/memory/"
+    def _anexo(ts, a, uuid=None):
+        return {"type": "attachment", "timestamp": ts, "uuid": uuid or ts, "attachment": a}
+    def _indice(ts, extra=()):
+        fs = [{"path": mdir + "MEMORY.md", "type": "AutoMem", "content": "index"}]
+        fs += [{"path": mdir + e + ".md", "type": "AutoMem", "content": "x"} for e in extra]
+        return _anexo(ts, {"type": "instructions", "files": fs})
+    def _leitura(ts, nome):
+        return {"type": "assistant", "timestamp": ts, "message": {"content": [
+            {"type": "tool_use", "name": "Read", "input": {"file_path": mdir + nome + ".md"}}]}}
+    with tempfile.TemporaryDirectory() as tmp:
+        _transcript(tmp + "/neg", "s1", [_indice("2026-01-01T00:00:00Z")])
+        c = varre(Path(tmp + "/neg"))["canal"]
+        txt = "\n".join(relatorio_canal(c, 1))
+        _t(c["indice"] == 1 and c["injetadas"] == [] and "INJECTED RECALL · 0 memory" in txt
+           and txt.index("INDEX CHANNEL") < txt.index("INJECTED RECALL"),
+           "channel · negative · only the index arrived: index counted 1, printed ABOVE a zero", f)
+        _transcript(tmp + "/pos", "s1", [_indice("2026-01-01T00:00:00Z", extra=["planted_memory"])])
+        c = varre(Path(tmp + "/pos"))["canal"]
+        _t(c["indice"] == 1 and [x["nome"] for x in c["injetadas"]] == ["planted_memory"],
+           "channel · positive · a memory planted in the index channel is seen: 1 of 1", f)
+        _transcript(tmp + "/cego", "s1", [_leitura("2026-01-01T00:00:00Z", "some_memory")])
+        c = varre(Path(tmp + "/cego"))["canal"]
+        txt = "\n".join(relatorio_canal(c, 1))
+        _t(c["indice"] == 0 and "NOT MEASURED" in txt and "INJECTED RECALL · 0" not in txt,
+           "channel · blind · no index attachment: the zero is refused, not printed", f)
+        _transcript(tmp + "/re", "s1", [
+            _indice("2026-01-01T00:00:00Z"),
+            _leitura("2026-01-01T00:01:00Z", "read_before"),
+            _anexo("2026-01-01T00:09:00Z", {"type": "file", "filename": mdir + "read_before.md"}),
+            _anexo("2026-01-01T00:09:01Z", {"type": "file", "filename": mdir + "never_opened.md"}),
+            _anexo("2026-01-01T00:09:02Z", {"type": "edited_text_file", "filename": mdir + "read_before.md"})])
+        c = varre(Path(tmp + "/re"))["canal"]
+        orig = sorted((x["tipo"], x["nome"], x["aberta_antes"]) for x in c["reentregas"])
+        _t(c["injetadas"] == [] and orig == [("edited_text_file", "read_before", True),
+                                             ("file", "never_opened", False), ("file", "read_before", True)],
+           "channel · re-delivery is not recall, and carries its origin (opened before × none found)", f)
     # FIELD positive control: running on the real base, the top has to exist
     d = varre()
     _sem_tr = None if d["_pop"]["arquivos"] else "session transcripts under " + str(PROJETOS)
@@ -285,7 +414,9 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv:
         sys.exit(selftest())
     dados = varre()
-    if "--json" in sys.argv:
+    if "--injecao" in sys.argv:
+        print("\n".join(relatorio_canal(dados["canal"], dados["_pop"]["arquivos"])))
+    elif "--json" in sys.argv:
         print(json.dumps(dados, ensure_ascii=False, indent=1, default=str))
     else:
         print(relatorio(dados, so_nunca="--nunca" in sys.argv))

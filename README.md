@@ -141,7 +141,14 @@ the red. Without that, the proof falls behind the population.
 
 1. **Declare the regimes and measure the starting point.** Three lists (resident, paged, interrupt)
    and the count of injected recalls in your transcripts:
-   `python3 scripts/memoria-recall.py` over your own store (`HIPO_PROJECT_DIR`).
+   `python3 scripts/memoria-recall.py` over your own store (`HIPO_PROJECT_DIR`). The zero comes
+   with its control on the same channel: the script first counts how many times the index
+   (`MEMORY.md`) arrived as an `instructions` attachment, and only then prints how many memory
+   files arrived the same way. If the index was never seen, it prints no zero: a blind scan and a
+   real zero look the same. The honest reading of a zero is "nothing arrived through the channel
+   that delivers the index". Files the runtime sends again after a compaction, or when an open file
+   changes, are listed apart with their origin (opened before, or no opening found) and do not
+   count as recall. `--injecao` prints only this part.
 2. **Index, gloss and the ceiling arithmetic.** The native index loads up to 200 lines or 25,000
    units, whichever cuts first. Format: `docs/MEMORIA.md`, example: `examples/memory/`. The index guard's own
    ceiling is 24,576 bytes (24 KiB): UTF-8 bytes are never fewer than UTF-16 units, so a byte ceiling
@@ -191,7 +198,7 @@ received, it does not measure.
 | piece | native feature | proof | measured trap |
 |---|---|---|---|
 | index with gloss | `MEMORY.md` | the index text in the transcript's first message | cuts at 200 lines or 25,000 units, whichever comes first, and the binding limit changes over time; the index is per project folder, and a session opened in another folder does not load it |
-| paged memory | files next to the index, opened by `Read` | openings counted in the transcripts (`memoria-recall.py`) | no automatic recall; fewer than half of the memories were ever opened |
+| paged memory | files next to the index, opened by `Read` | openings counted in the transcripts (`memoria-recall.py`) | no automatic recall (nothing arrives through the channel that delivers the index); after a compaction the runtime may send again a memory already opened; fewer than half of the memories were ever opened |
 | map in slices | `UserPromptSubmit` and `SessionStart` (`compact`) hooks | emitted × transcript, byte by byte | 10,000-unit cap per registered command; above it the window receives a preview of the first 2,000 units (about 2 KB) |
 | resume after compacting | `SessionStart` with matcher `compact` | the same comparison, at the first compaction | `PostCompact` creates no context attachment: its output only arrives through the echo of a manual `/compact`, never on automatic compaction |
 | contract outside `CLAUDE.md` | `CLAUDE.md` | the memory attachment in the transcript | in a subfolder it only arrives through `Read` |
@@ -233,7 +240,7 @@ The real memories, map, baton and rulers stay private.
 
 - Selftests whose cases need a population a fresh clone does not have **skip** those cases and
   say so (`skipped: needs ...`), instead of failing: `memoria-recall.py` (a `user_profile.md` memory
-  and real transcripts; 15 ok · 5 skipped in a fresh clone), `contexto-consumo.py` (real subagent
+  and real transcripts; 19 ok · 5 skipped in a fresh clone), `contexto-consumo.py` (real subagent
   transcripts; 4 ok · 1 skipped), `guarda-ja-existe.py` (more than 100 rule blocks; 21 ok · 1
   skipped), `horizonte.py` (a git repository with a `memoria/` folder imported in one commit and
   `docs/` grown commit by commit; 5 ok · 3 skipped). A skipped case proves nothing: run it again
