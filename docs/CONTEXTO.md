@@ -212,6 +212,12 @@ It is updated at every work event — the post-mortem is the natural ride. `cont
 the net that catches what the summary drops; a manual instruction to `/compact` is reinforcement, not
 mechanism.
 
+**Rule 2 of EVAPORATED:** a turn is judged by the user's own segments (without the
+`<pasted_content>` blocks) and evaporates only if its signature did not arrive **and** fewer than half
+of those segments did; `devolvida` is set only once everything came out (`emitidas` counts it). New
+ledger records carry `"regua": 2`; older ones are rule 1 and are not re-measured. The defect and the
+numbers are in the header of `scripts/contexto-medir.py`.
+
 **Its shape follows §6:** line 1 is a pointer to [`mesa/BASTAO_REGRAS.md`](mesa/BASTAO_REGRAS.md)
 (what the baton is and its rules), line 2 is the `*Updated:` line, then dated entries (`- `), newest
 first, then footer sections (`## …`). The hook runs `bastao-entrega.py --emitir docs/mesa/BASTAO.md`,

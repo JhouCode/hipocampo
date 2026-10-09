@@ -12,10 +12,11 @@ WHAT IT MEASURES, and the unit matters
   Not "how many tokens fell" — `preTokens - postTokens` already says that and teaches nothing. It
 is **how many of the USER's turns survived**, because that is the loss that costs: decisions made
 in chat evaporate, and it is always the ones that come **after the main subject** of a long message.
-  For every user message before the boundary, it looks for a distinctive signature in the summary:
+  For every user message before the boundary, it looks for the user's own sentences in the summary
+(pasted blocks marked `<pasted_content …>` are set aside first — they are not the user's words):
     LITERAL    preserved byte for byte (`preservedMessages.uuids`)
-    CITED      the summary carries a recognizable sentence of it
-    EVAPORATED nothing of it reached the other side
+    CITED      the summary carries its signature, or at least half of its own segments
+    EVAPORATED neither: the signature did not arrive and fewer than half of its segments did
 
 ⚠️ INHERITED vs OWN BOUNDARY
   A session BORN from a compaction has the boundary in its first lines, and the context that was
@@ -37,12 +38,36 @@ and 1,286 user turns was: **70.5% CITED · 13.5% evaporated · 0.1% literal.**
   It only showed up because the mechanism ran on a real event: in fixtures boundaries do not repeat.
 
 ⚠️ "A WHOLE TURN" IS STILL A COARSE UNIT — the loss that matters most is smaller
-  The classification judges a message by its longest sentence. A message with 5 subjects counts as
-CITED if the summary carried 1, and the other 4 vanish without a number. Measured: **26.5% of the
-segments** of long messages judged preserved did not arrive (430 raw; **115 after filtering** paths,
-URLs, pasted machine output and pasted chat logs). See `segmentos_uteis`.
+  A message with 5 subjects counts as CITED if the summary carried enough of it, and the subjects
+that did not arrive vanish without a number. Measured under rule 1 (below), when the classification
+judged a message by its longest sentence alone: **26.5% of the segments** of long messages judged
+preserved did not arrive (430 raw; **115 after filtering** paths, URLs, pasted machine output and
+pasted chat logs). They are kept as ORPHANS and returned. See `segmentos_uteis`.
   ⚠️ DECLARED RESIDUE: in a real render, 1 of 6 orphans was still a pasted chat line. Tightening
 further starts eating the user's prose — stopped here on purpose.
+
+⚠️ RULE 2 — "EVAPORATED" judged a turn by ONE sentence, and "returned" overstated what came out
+  Re-measured on a real sample of 103 compactions and 1,304 user turns, 141 of them evaporated:
+  · the signature was the longest useful segment, and it could be pasted material rather than the
+user's words, or simply the one sentence the summary did not carry. In **29 of the 141**, half or
+more of the user's OWN segments were in the summary; against the summary of ANOTHER compaction
+(control, two random pairings), **0 and 2 of 141**. Now a turn is judged without its
+`<pasted_content …>` blocks and EVAPORATES only if its own signature did not arrive **and** fewer
+than half of its own segments did (`classifica`). On the same sample: 141 → **112**, those 29 and
+only those; 0 cited turns became evaporated.
+  · a turn that OPENS with a pasted block used to be dropped from the population by its leading `<`;
+now the paste is removed and the user's remaining text counts (+1 turn in the sample, cited). A
+paste-only turn still does not count.
+  · `devolvida=true` did not mean emitted: the returner cut what exceeded the cap and then marked the
+WHOLE record returned, so the cut part never came out. Now the cut part stays PENDING and comes out
+on the next prompt; `emitidas` counts what came out and `devolvida` is set only when nothing is left.
+And a `--devolver` call without `transcript_path` returns nothing (it used to take every
+conversation's pending turns).
+  · New records carry `"regua": 2`. Older records are rule 1 and are NOT re-measured: numbers
+already published from them stay rule 1. Whoever sums the ledger splits by `regua`.
+  ⚠️ A THIRD POPULATION, not a defect: an evaporated turn with no prose COUNTS but is not returned.
+And what the per-record caps of 40 turns / 25 orphans cut at MEASUREMENT time never becomes pending —
+that cut belongs to the measurement, not to the returner.
 
 USAGE
   contexto-medir.py --historico        scans every transcript and measures past compactations
@@ -60,6 +85,12 @@ import hipo_config as HC
 PROJ = Path(os.environ.get("CLAUDE_PROJ", HC.PROJECT_DIR))
 LEDGER = Path(os.environ.get("CONTEXTO_LEDGER", str(PROJ / "contexto-compactacoes.jsonl")))
 MIN_ASSINATURA = 28          # chars — below this a sentence matches by chance
+REGUA = 2                    # version of the classification written into every new record — see RULE 2
+LIMIAR_SEGMENTOS = 0.5       # share of the user's OWN segments in the summary that makes a turn CITED
+# What the user PASTES comes marked in the transcript, with the same id on the opening and closing
+# tags: `<pasted_content id="…">` … `</pasted_content id="…">`. A block without its closing tag does
+# not match and stays in the text (judged as rule 1 judged it).
+COLADO = re.compile(r'<pasted_content\b[^>]*>.*?</pasted_content\b[^>]*>', re.S)
 
 
 def texto_de(msg):
@@ -87,6 +118,13 @@ def e_fala_do_usuario(d):
     t = texto_de(d.get("message")).strip()
     if not t or len(t) < 3:
         return False
+    # ⚠️ RULE 2: a turn that OPENS with a pasted block is still the user's if their own text remains.
+    # The filter below used to drop the whole turn because of the paste's `<` — the text the user
+    # wrote next to the paste was never measured.
+    if t.startswith("<pasted_content"):
+        t = COLADO.sub("", t).strip()
+        if len(t) < 3:
+            return False
     if t.startswith(("<", "This session is being continued", "Caveat:")):
         return False
     # ⚠️ SYSTEM markers the transcript records as `user` — not user turns. Without this filter,
@@ -99,7 +137,8 @@ def e_fala_do_usuario(d):
 
 
 def assinatura(txt):
-    """The most distinctive sentence of the message — the one searched for in the summary.
+    """The most distinctive sentence of the message — searched for in the summary, together with the
+    share of its own segments that arrived (see `classifica`; rule 1 used the signature alone).
 
     Takes the longest stretch without strong punctuation, ignoring the first words (usually "ok",
     "sure", "go ahead"): what identifies the message is the MIDDLE, not the opening.
@@ -119,10 +158,11 @@ def assinatura(txt):
 def segmentos_uteis(txt):
     """The pieces of a message worth checking one by one.
 
-    ⚠️ BORN FROM A MEASURED BLIND SPOT. `assinatura` judges the message by its LONGEST stretch: in
-    a message with 5 subjects, if the summary carries the biggest, it counts as CITED and the other
-    4 vanish without entering any number. That is exactly where what the user decides AFTER the
-    main subject lives.
+    ⚠️ BORN FROM A MEASURED BLIND SPOT. Under rule 1, `assinatura` judged the message by its LONGEST
+    stretch alone: in a message with 5 subjects, if the summary carried the biggest, it counted as
+    CITED and the other 4 vanished without entering any number. (Rule 2 also counts how many of these
+    segments arrived — see `classifica` — but a CITED turn can still be missing some of them.) That
+    is exactly where what the user decides AFTER the main subject lives.
       Measured on 247 messages of 3+ segments judged preserved: **26.5% of the segments (430 raw,
     115 after the filters below) did not reach the summary**, with cases of 2% coverage.
       The filter removes citation noise (path, URL, pasted output): it inflates the count, and
@@ -176,8 +216,43 @@ def parecido(assin, resumo_norm):
     return achadas / len(palavras) >= 0.7      # 70% of the long words present
 
 
-def mede_arquivo(caminho):
-    """Returns one measurement per compaction found in the transcript."""
+def proprio(txt):
+    """The text that is the USER's: the turn without its marked pasted blocks."""
+    return COLADO.sub(" ", txt)
+
+
+def classifica(txt, rnorm):
+    """Judges ONE turn (not preserved literally) against the normalized summary — rule 2.
+
+    Returns `(bucket, orphans)`, with bucket in `citada` · `evaporada` · `sem_assinatura`, and
+    `orphans` the segments of a CITED turn that did not arrive (only for turns of 3+ segments, as
+    before). A turn EVAPORATES only if its own signature did not arrive AND fewer than half of its
+    own segments did; with half or more it is CITED, and what is missing becomes an orphan.
+    ⚠️ A turn with no useful segment of its own (all paste, or just "look at this:") gets no new
+    bucket: it is judged as rule 1 judged it, by the whole text.
+    """
+    segs = segmentos_uteis(proprio(txt))
+    if not segs:
+        a = assinatura(txt)
+        if not a:
+            return "sem_assinatura", []
+        if not parecido(a, rnorm):
+            return "evaporada", []
+        segs_t = segmentos_uteis(txt)
+        return "citada", ([s for s in segs_t if not parecido(s, rnorm)] if len(segs_t) >= 3 else [])
+    chegaram = [s for s in segs if parecido(s, rnorm)]
+    if parecido(max(segs, key=len), rnorm) or len(chegaram) >= LIMIAR_SEGMENTOS * len(segs):
+        return "citada", ([s for s in segs if s not in chegaram] if len(segs) >= 3 else [])
+    return "evaporada", []
+
+
+def mede_arquivo(caminho, detalhe=None):
+    """Returns one measurement per compaction found in the transcript.
+
+    `detalhe`, if a list, receives one dict per judged turn (uuid, compaction, bucket and, outside the
+    literal ones, the text and the normalized summary) — it lets a re-measurement compare two rules
+    turn by turn without writing to the ledger. None of it goes into the record.
+    """
     try:
         linhas = [json.loads(l) for l in open(caminho, encoding="utf-8") if l.strip().startswith("{")]
     except Exception as e:
@@ -230,25 +305,29 @@ def mede_arquivo(caminho):
         evaporadas, orfaos = [], []
         for fx in falas:
             if fx.get("uuid") in pres:
-                lit += 1; continue
+                lit += 1
+                if detalhe is not None:
+                    detalhe.append({"uuid": fx.get("uuid"), "compactacao": ts, "balde": "literal"})
+                continue
             txt_fx = texto_de(fx.get("message"))
-            a = assinatura(txt_fx)
-            if not a:
+            balde, orf_fx = classifica(txt_fx, rnorm)
+            if detalhe is not None:
+                detalhe.append({"uuid": fx.get("uuid"), "compactacao": ts, "balde": balde,
+                                "txt": txt_fx, "rnorm": rnorm})
+            if balde == "sem_assinatura":
                 sem_assin += 1; continue
-            if parecido(a, rnorm):
+            if balde == "citada":
                 cit += 1
-                # ⚠️ CITED IS NOT WHOLE. The message passed through its signature, but its other
-                # subjects may have been dropped — see `segmentos_uteis`. The orphans are kept to be
-                # returned, otherwise the loss that matters most stays without a number.
-                segs = segmentos_uteis(txt_fx)
-                if len(segs) >= 3:
-                    for s in segs:
-                        # ⚠️ dedupe: the same line came 3x in a real render. Repeating it spends the
-                        # cap and makes the section look like junk — and a section that looks like
-                        # junk teaches the reader to skip it, including when it carries a decision.
-                        if (not parecido(s, rnorm) and len(orfaos) < 25
-                                and s[:400] not in [o["txt"] for o in orfaos]):
-                            orfaos.append({"txt": s[:400], "quando": fx.get("timestamp", "")[:16]})
+                # ⚠️ CITED IS NOT WHOLE. The turn passed (its signature, or half of its own segments,
+                # reached the summary), but its other subjects may have been dropped — see
+                # `segmentos_uteis`. The orphans are kept to be returned, otherwise the loss that
+                # matters most stays without a number.
+                for s in orf_fx:
+                    # ⚠️ dedupe: the same line came 3x in a real render. Repeating it spends the
+                    # cap and makes the section look like junk — and a section that looks like
+                    # junk teaches the reader to skip it, including when it carries a decision.
+                    if len(orfaos) < 25 and s[:400] not in [o["txt"] for o in orfaos]:
+                        orfaos.append({"txt": s[:400], "quando": fx.get("timestamp", "")[:16]})
             else:
                 eva += 1
                 # THE WHOLE TEXT, not the signature: this is what goes back into the next context.
@@ -278,7 +357,10 @@ def mede_arquivo(caminho):
             # stretches lost INSIDE messages counted as preserved
             "orfaos": orfaos,
             "transcript": str(caminho),
+            # ⚠️ RULE 2: whoever sums the ledger splits by `regua` (a record without it is rule 1)
+            "regua": REGUA,
             "devolvida": False,
+            "emitidas": 0,        # items the returner has ALREADY emitted — `devolvida` only with all
         })
         ts_ant = ts           # the next window starts at the instant of this boundary
     return out
@@ -457,24 +539,37 @@ def devolver():
     # would hand the turns of ANOTHER conversation here, and consume them (`devolvida=True`) before
     # the owning conversation opened. Losing by silence is bad; returning in the wrong place is
     # worse, because it looks like it worked.
-    if tp:
-        cands = [r for r in cands if r.get("transcript") == tp]
+    # ⚠️ AND WITHOUT `transcript_path` NOTHING IS RETURNED. The filter used to be `if tp:` — a call
+    # without the field (a manual dry run, `echo '{}' | --devolver`) took the pending turns of EVERY
+    # conversation and marked them emitted. The same poison as the fallback, through another door.
+    if not tp:
+        return 0
+    cands = [r for r in cands if r.get("transcript") == tp]
     if not cands:
         return 0
 
     # ⚠️ ALL pending ones, oldest to newest — not only the last. If two compactions happen before a
     # return (a session that dies early, a hook that did not run), `cands[-1]` would leave the older
     # one stuck in the ledger forever, marked not-returned and never read. The cap is still the brake.
+    # 🚨 WHAT THE CAP CUTS STAYS PENDING (rule 2). The loop used to cut what exceeded the cap and then
+    # mark the WHOLE record returned: the cut part never came out. Now each record keeps only what has
+    # NOT come out yet (`pendente_f`/`pendente_o`), adds what did to `emitidas`, and only becomes
+    # `devolvida` when nothing is left — the rest comes out on the next prompt (UserPromptSubmit).
     usado, mostradas, cortadas = 0, [], 0
+    pendente_f = {id(r): [] for r in cands}
+    pendente_o = {id(r): [] for r in cands}
+    saiu = {id(r): 0 for r in cands}
     for reg in cands:
-        for f in reg["falas_evaporadas"]:
+        for f in reg.get("falas_evaporadas") or []:
             t = (f.get("txt") if isinstance(f, dict) else str(f)).strip()
             if not t:
-                continue
+                continue                  # an empty item has nothing to return: it leaves the queue
             if usado + len(t) > TETO_DEVOLVER:
                 cortadas += 1
+                pendente_f[id(reg)].append(f)
                 continue
             usado += len(t)
+            saiu[id(reg)] += 1
             mostradas.append((f.get("quando", "") if isinstance(f, dict) else "", t))
     # ⚠️ orphans come AFTER, with whatever cap is left: a whole lost turn has priority
     orfaos, orf_cortados = [], 0
@@ -485,8 +580,10 @@ def devolver():
                 continue
             if usado + len(t) > TETO_DEVOLVER:
                 orf_cortados += 1
+                pendente_o[id(reg_o)].append(f)
                 continue
             usado += len(t)
+            saiu[id(reg_o)] += 1
             orfaos.append((f.get("quando", ""), t))
     reg = cands[-1]
     if not mostradas and not orfaos:
@@ -532,19 +629,25 @@ def devolver():
             marca = f"**{quando_o}** · " if quando_o else ""
             linhas_out.append(f"- {marca}{t}")
         if orf_cortados:
-            linhas_out.append(f"\n*(+{orf_cortados} stretch(es) did not fit under the cap)*")
+            linhas_out.append(f"\n*(+{orf_cortados} stretch(es) did not fit under the cap — they come "
+                              f"out on the next prompt)*")
     if cortadas:
         # ⚠️ never cut silently: what did not fit shows up as a NUMBER
         linhas_out.append("")
         linhas_out.append(f"*(+{cortadas} turn(s) did not fit under the cap of {TETO_DEVOLVER} chars — "
-                          f"`contexto-medir.py --historico` shows them all)*")
+                          f"they come out on the next prompt)*")
     print("\n".join(linhas_out))
 
-    # Idempotence: mark ALL that were read in this round. ⚠️ Marking only `cands[-1]` would leave
-    # the earlier ones pending forever — they were already emitted, so they would repeat every prompt.
+    # Idempotence: what CAME OUT does not come out again, and what did not is not lost. Each record
+    # keeps only its pending part; `devolvida` only when that is empty. ⚠️ Look at ALL candidates,
+    # not only `cands[-1]`: the earlier ones already emitted would repeat on every prompt.
     try:
         for r in cands:
-            r["devolvida"] = True
+            r["emitidas"] = r.get("emitidas", 0) + saiu[id(r)]
+            r["falas_evaporadas"] = pendente_f[id(r)]
+            r["orfaos"] = pendente_o[id(r)]
+            if not pendente_f[id(r)] and not pendente_o[id(r)]:
+                r["devolvida"] = True
         # ⚠️ PRUNING — the ledger is read ON EVERY PROMPT. Each record can carry 40 turns of 1200
         # chars + 25 orphans of 400: ~58 KB. At the measured pace (8 compactions/day) that projects
         # **42 MB in 90 days** re-read on every message, and the cost would show up as diffuse
@@ -596,27 +699,58 @@ def selftest():
     import tempfile, os as _os
     with tempfile.TemporaryDirectory() as td:
         led = _os.path.join(td, "l.jsonl")
-        falas = [{"txt": "x"*500, "quando": "2026-01-0%d" % (i%9+1)} for i in range(20)]
-        reg = {"quando":"t","preTokens":1000,"postTokens":10,"falas":20,"evaporadas":20,
+        # ⚠️ 12 x 500 = 6,000 chars against the 4,000 cap: fits in TWO calls, never in one. Each turn
+        # carries its OWN text (`turn NN`) — with 20 copies of "x"*500, as it was, the "does not
+        # repeat" check could not tell a repetition from a continuation.
+        falas = [{"txt": "turn %02d " % i + "x"*492, "quando": "2026-01-0%d" % (i%9+1)}
+                 for i in range(12)]
+        reg = {"quando":"t","preTokens":1000,"postTokens":10,"falas":12,"evaporadas":12,
                "falas_evaporadas":falas,"transcript":"/t.jsonl","devolvida":False}
         open(led,"w").write(json.dumps(reg)+"\n")
         globals()["LEDGER"] = Path(led)
         import io, contextlib
-        buf = io.StringIO()
-        _stdin = sys.stdin; sys.stdin = io.StringIO('{"transcript_path":"/t.jsonl"}')
-        with contextlib.redirect_stdout(buf): devolver()
-        sys.stdin = _stdin
-        out = buf.getvalue()
+        _stdin = sys.stdin
+
+        def chama_devolver(tp):
+            b = io.StringIO()
+            sys.stdin = io.StringIO(json.dumps({"transcript_path": tp}))
+            try:
+                with contextlib.redirect_stdout(b): devolver()
+            finally:
+                sys.stdin = _stdin
+            return b.getvalue()
+
+        def reg_led():
+            try:
+                return json.loads(open(led).readline())
+            except Exception:
+                return {}
+        # ⚠️ a call WITHOUT `transcript_path` (a manual dry run, `echo '{}' | --devolver`) must not
+        # take the pending turns of EVERY conversation and mark them emitted — the same poison as
+        # the cross-session fallback, through another door.
+        out0 = chama_devolver(None)
+        checa("returner · without `transcript_path` emits and consumes nothing",
+              out0.strip() == "" and reg_led().get("devolvida") is False
+              and not reg_led().get("emitidas"))
+        out = chama_devolver("/t.jsonl")
+        r1 = reg_led()
         checa("returner · respects the char cap", len(out) < TETO_DEVOLVER + 1200)
         # ⚠️ a silent cut is the worst outcome: what did not fit must become a NUMBER
         checa("returner · DECLARES how many turns did not fit", "did not fit under the cap" in out)
-        checa("returner · marks as returned (idempotence)",
-              json.loads(open(led).readline())["devolvida"] is True)
-        buf2 = io.StringIO()
-        sys.stdin = io.StringIO('{"transcript_path":"/t.jsonl"}')
-        with contextlib.redirect_stdout(buf2): devolver()
-        sys.stdin = _stdin
-        checa("returner · 2nd call does NOT repeat", buf2.getvalue().strip() == "")
+        # 🚨 (e) RULE 2 — what the cap cut is NOT returned. The old loop cut what exceeded the cap
+        # and then marked the WHOLE record returned, so the cut part never came out.
+        n1 = sum(("turn %02d " % i) in out for i in range(12))
+        checa("returner (e) · 1st call emits part and the record stays NOT returned",
+              0 < n1 < 12 and r1.get("devolvida") is False and r1.get("emitidas") == n1)
+        out2 = chama_devolver("/t.jsonl")
+        r2 = reg_led()
+        n2 = sum(("turn %02d " % i) in out2 for i in range(12))
+        checa("returner (e) · 2nd call emits THE REST, without repeating the 1st",
+              n1 + n2 == 12 and not any(("turn %02d " % i) in out and ("turn %02d " % i) in out2
+                                        for i in range(12)))
+        checa("returner (e) · marks returned only when EVERYTHING came out (idempotence)",
+              r2.get("devolvida") is True and r2.get("emitidas") == 12)
+        checa("returner (e) · 3rd call emits nothing", chama_devolver("/t.jsonl").strip() == "")
 
     # -- THE RACE and ATTRIBUTION: the two defects only the first real event showed -------------
     # Checks written AFTER the defect, and proven by removing `sincroniza()` from the returner
@@ -804,6 +938,77 @@ def selftest():
         checa("orphan · the returner emits the section even with no whole turn lost",
               "HALFWAY" in buf5.getvalue() and sec1 in buf5.getvalue())
 
+    # -- RULE 2: a turn is judged by what the USER wrote -------------------------------------------
+    # 🚨 The signature was the longest useful segment. In a turn with pasted material it could land
+    # on the paste — a pasted dump line in a turn that was 99% paste, whose one sentence by the user
+    # did reach the summary — and in a turn with several subjects it could simply be the one the
+    # summary did not carry while most of the others did.
+    resumo_r2 = ("session recap: the user asked that the dashboard show the weekly ranking of votes "
+                 "with the total per person. they also said to shut down the test server after the "
+                 "nightly battery.")
+    no_resumo1 = "the dashboard show the weekly ranking of votes with the total per person"
+    no_resumo2 = "shut down the test server after the nightly battery"
+    fora1 = "the healer lost the target in the dungeon and nobody could explain why it happened"
+    fora2 = "the new guild should have its own bank with separate tabs for rare materials"
+    fora3 = "the flying mount needs a trainer in every capital city of the continent"
+    # the paste is LONGER than the user's sentence, on purpose: that is what broke rule 1
+    colado = ('<pasted_content id="ab12">\n'
+              "fatal error loading the serialization module of the client during the complete "
+              "startup of the main program\n"
+              "secondary failure recorded by the debugger when the graphics library tried to "
+              "allocate too much shared memory\n"
+              "process terminated by the operating system after trying to write outside the "
+              "region allowed by the loader\n"
+              '</pasted_content id="ab12">')
+
+    def um(txt):
+        """Measures ONE turn against `resumo_r2` through the real path (`mede_arquivo`)."""
+        with tempfile.TemporaryDirectory() as tdu:
+            tru = _os.path.join(tdu, "u.jsonl")
+            lin = [{"type": "assistant", "message": {"role": "assistant", "content": "open"}},
+                   {"type": "user", "uuid": "f1", "timestamp": "2026-03-01T10:00:00.000Z",
+                    "message": {"role": "user", "content": txt}},
+                   {"type": "system", "subtype": "compact_boundary",
+                    "timestamp": "2026-03-01T11:00:00.000Z",
+                    "compactMetadata": {"preTokens": 3000, "postTokens": 100, "trigger": "auto",
+                                        "preservedMessages": {"uuids": []}}},
+                   {"type": "user", "isCompactSummary": True,
+                    "message": {"role": "user", "content": resumo_r2}}]
+            open(tru, "w").write("\n".join(json.dumps(x) for x in lin) + "\n")
+            rr = [r for r in mede_arquivo(tru) if not r.get("erro")]
+            return rr[0] if rr else {}
+    ra = um(f"I need {no_resumo1}\n{colado}")
+    checa("rule 2 (a) · turn with a long paste and the USER's sentence in the summary is CITED",
+          ra.get("citadas") == 1 and ra.get("evaporadas") == 0)
+    # ⚠️ NEGATIVE CONTROLS — the fix must not hide a real loss
+    rb = um(f"{no_resumo2}. {fora1}. {fora2}")
+    checa("rule 2 (b) · user-only turn, signature out and < 50% in the summary, EVAPORATED",
+          rb.get("evaporadas") == 1 and rb.get("citadas") == 0)
+    rb2 = um(f"{fora1}\n{colado}")
+    checa("rule 2 (b) · paste + the user's sentence OUT of the summary still EVAPORATED",
+          rb2.get("evaporadas") == 1 and rb2.get("citadas") == 0)
+    rc = um(f"{no_resumo1}. {no_resumo2}. {fora1}. {fora2}")
+    orf_c = " | ".join(o["txt"] for o in rc.get("orfaos") or [])
+    checa("rule 2 (c) · 2 of 4 segments in the summary is CITED",
+          rc.get("citadas") == 1 and rc.get("evaporadas") == 0)
+    checa("rule 2 (c) · the 2 missing become orphans, the 2 that arrived do not",
+          fora1 in orf_c and fora2 in orf_c and no_resumo1 not in orf_c and no_resumo2 not in orf_c)
+    rd = um(f"{no_resumo2}. {fora1}. {fora2}. {fora3}")
+    checa("rule 2 (d) · 1 of 4 segments in the summary EVAPORATED",
+          rd.get("evaporadas") == 1 and rd.get("citadas") == 0)
+    # a turn with no useful segment of its own keeps the bucket rule 1 gave it, no new bucket
+    rg = um(f"look at this:\n{colado}")
+    checa("rule 2 · turn with no useful own segment keeps the old bucket (here EVAPORATED)",
+          rg.get("evaporadas") == 1 and rg.get("citadas") == 0 and rg.get("sem_assinatura") == 0)
+    checa("rule 2 (f) · a new record carries `regua: 2` and `emitidas: 0`",
+          ra.get("regua") == 2 and ra.get("emitidas") == 0)
+
+    checa("population · a turn that OPENS with a paste and has the user's text counts",
+          e_fala_do_usuario({"type":"user","message":{"content":
+              '<pasted_content id="z9">client dump</pasted_content id="z9">\nthis happened in the dungeon again'}}))
+    checa("population · a paste-ONLY turn does not count",
+          not e_fala_do_usuario({"type":"user","message":{"content":
+              '<pasted_content id="z9">client dump</pasted_content id="z9">'}}))
     checa("population · a real user text counts",
           e_fala_do_usuario({"type":"user","message":{"content":"go ahead, commit and make section 15 a pointer"}}))
     print(f"== {ok} ok · {ruim} failure(s) ==")
