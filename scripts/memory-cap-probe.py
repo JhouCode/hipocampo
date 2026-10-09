@@ -11,12 +11,23 @@ taken down by two defects pointed out in the thread and a third that showed up i
   3. split('\n') on a file ending in a newline creates a ghost line ->
      an index of exactly 200 lines was declared cut when it was not. (ours)
 
-Proven both ways: 3 fixtures from the report + 4 edge controls
-(200 with/without newline, 201, 199) + a negative control. See docs/CONTEXTO.md.
+v3 (09/10/2026) follows the loader's own rule, which @John-Rood read out of the Claude Code
+bundle (2.1.284 and 2.1.292) in anthropics/claude-code#99403 (comment 6084865166):
+the file is trimmed first; lines = newlines + 1; units = UTF-16 length, where a CR counts
+(the cut runs before CRLF is normalized); it cuts when lines > 200 or units > 25,000, keeps
+the first 200 lines, then cuts at the last newline at or before unit 25,000.
+Run against Claude Code 2.1.293 on 7 files, v2 disagreed with the session on 3:
+
+  4. a CRLF file the session cut was reported as fitting: the file was read in text
+     mode and every CR vanished before the count. The wrong direction: silence while it cuts.
+  5. blank lines at the end were counted; the session trims them -> a false cut.
+  6. a file of exactly 25,000 units was reported cut: each line was charged a newline,
+     the last one included. The session loads it whole.
+
+v3 agrees with the session on all 7. The selftest carries one case per defect.
 
 ⚠️ This is ARITHMETIC on the file, not an observation of what the session loaded.
-   It predicts the cut; it does not measure it. CAP=25000 is documented and round — the bracket
-   measured by @pjt222 is [24958, 25018).
+   It predicts the cut; it does not measure it.
 """
 import os
 import sys
@@ -24,35 +35,56 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hipo_config as HC
 
+def _carga(path):
+    """What the loader measures: the file as bytes (a CR stays a CR), trimmed like JS
+    .trim() (whitespace and the BOM), as UTF-16 code units. Returns (units, n_lines)
+    where units is the trimmed text encoded as UTF-16-LE."""
+    import re
+    s = open(path, encoding='utf-8', newline='').read()
+    t = re.sub(r'^[\s\ufeff]+|[\s\ufeff]+$', '', s)
+    u = t.encode('utf-16-le')
+    return u, (t.count('\n') + 1 if t else 0)
+
+
+def _nl_antes(u, fim):
+    """UTF-16 index of the last newline at or before unit `fim`, or -1."""
+    i = u.rfind(b'\n\x00', 0, 2 * fim + 2)
+    while i > 0 and i % 2:                       # an odd hit straddles two code units
+        i = u.rfind(b'\n\x00', 0, i + 1)
+    return i // 2 if i >= 0 else -1
+
+
 def measure(path, LINES=200, CAP=25000):
-    """Which cap binds first, and where it cuts. CAP is the documented figure;
-    pjt222's four-width bracket puts the real boundary in [24958, 25018)."""
-    s = open(path, encoding='utf-8').read()
-    lines = s.split('\n')
-    if lines and lines[-1] == '':
-        lines.pop()                      # trailing newline is not a line
-
-    size_cut = None
-    acc = 0
-    for i, l in enumerate(lines, 1):
-        acc += len((l + '\n').encode('utf-16-le')) // 2
-        if acc > CAP:
-            size_cut = i                 # first line that does NOT fit whole
-            break
-
-    line_cut = LINES + 1 if len(lines) > LINES else None
-
-    cuts = [(c, w) for c, w in ((size_cut, 'size'), (line_cut, 'line')) if c]
-    if not cuts:
-        return f"no cut ({len(lines)}/{LINES} lines, {acc}/{CAP} units)"
-    cut, which = min(cuts)               # whichever bites first
+    """Which cap binds first, and where it cuts, by the loader's rule (see the header)."""
+    u, n = _carga(path)
+    units = len(u) // 2
+    if n <= LINES and units <= CAP:
+        return f"no cut ({n}/{LINES} lines, {units}/{CAP} units)"
+    kept = u
+    if n > LINES:                                # keep the first 200 lines
+        j = -1
+        for _ in range(LINES):
+            j = u.find(b'\n\x00', 2 * j + 2 if j >= 0 else 0)
+            while j % 2:
+                j = u.find(b'\n\x00', j + 1)
+            j //= 2
+        kept = u[:2 * j]
+    which = 'line'
+    if len(kept) // 2 > CAP:                     # still too big: cut at a whole line
+        q = _nl_antes(kept, CAP)
+        kept = kept[:2 * q] if q > 0 else kept[:2 * CAP]
+        which = 'size'
+    k = len(kept) // 2
+    if u[2 * k:2 * k + 2] != b'\n\x00':          # no whole line survived
+        return f"size-bound, line 1 cut after {k} units (last kept: none)"
+    cut = kept.decode('utf-16-le').count('\n') + 2
     return f"{which}-bound, first line dropped: {cut} (last kept: {cut - 1})"
 
 
 # ---------------------------------------------------------------------------
 # THE RULER IN THE PATH.
 #
-# measure() above is published in thread #82056 and is NOT touched. What was missing
+# measure() above is the one published in thread #82056, corrected in v3 (header). What was missing
 # was a VOICE: `python3 memory-cap-probe.py` exited rc=0 with ZERO output — and silence
 # is indistinguishable from "all is well". The ruler sat in a drawer; a ruler outside
 # the path does not prevent the error.
@@ -66,11 +98,9 @@ def metrics(path, LINES=200, CAP=25000):
     """The same figures as measure(), but as NUMBERS — measure() only gives prose.
     The selftest demands that both agree: a new instrument that disagrees with the
     published one is a wrong instrument."""
-    s = open(path, encoding='utf-8').read()
-    lines = s.split('\n')
-    if lines and lines[-1] == '':
-        lines.pop()
-    units = sum(len((l + '\n').encode('utf-16-le')) // 2 for l in lines)
+    u, n = _carga(path)
+    units = len(u) // 2
+    lines = range(n)
     # THE BINDING SLACK (docs/MEMORIA.md): the index has TWO ceilings and the one that
     # closes FIRST rules. The size slack becomes line-equivalents through the REAL density
     # of this index (units/line) — in a size-bound regime it is the smaller one.
@@ -113,11 +143,17 @@ def _selftest():
         ('201 lines',             'x\n' * 201,                      True,  'line'),
         ('1 giant line',        'y' * 30000 + '\n',               True,  'size'),
         ('empty',                  '',                               False, None),
+        # v3, one per defect, each checked against a live Claude Code 2.1.293 session
+        ('CRLF over the cap (4)',  '\r\n'.join('x' * 165 for _ in range(150)), True, 'size'),
+        ('same file in LF',       '\n'.join('x' * 165 for _ in range(150)),   False, None),
+        ('blank lines at end (5)', 'x\n' * 150 + '\n' * 60 + '   \n',         False, None),
+        ('exactly 25,000 (6)',    '\n'.join(['x' * 199] * 124 + ['x' * 200]), False, None),
+        ('25,001',                '\n'.join(['x' * 199] * 124 + ['x' * 201]), True,  'size'),
     ]
     ok = True
     for nome, conteudo, deve_cortar, borda in casos:
         fd, p = tempfile.mkstemp(suffix='.md'); os.close(fd)
-        open(p, 'w', encoding='utf-8').write(conteudo)
+        open(p, 'w', encoding='utf-8', newline='').write(conteudo)
         try:
             r = measure(p)
             cortou = not r.startswith('no cut')

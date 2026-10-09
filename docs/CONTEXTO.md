@@ -244,10 +244,13 @@ deliver and fails when the delivery carries no live state.
 ⚠️ **The name lies: the warning is called `200-line read limit` and the trigger is the WRITE.** Count
 on a warning only for whoever **edits** the index — whoever only reads passes the cap seeing nothing.
 
-**The ruler is [`scripts/memory-cap-probe.py`](../scripts/memory-cap-probe.py)** — the three defects of
-its v1 are named in its header. ⚠️ It is **arithmetic on the file**: it predicts the cut, it does not
-measure it. The documented cap is 25,000 units (a bracket measured in the discussion puts the real
-boundary in [24,958, 25,018)) and 200 lines; whichever closes first binds.
+**The ruler is [`scripts/memory-cap-probe.py`](../scripts/memory-cap-probe.py)** — the six defects of
+its v1 and v2 are named in its header. ⚠️ It is **arithmetic on the file**: it predicts the cut, it does
+not measure it. Since v3 it follows the loader's own rule, read out of the Claude Code bundle in
+[anthropics/claude-code#99403](https://github.com/anthropics/claude-code/issues/99403): the file is
+trimmed, a CR counts as a unit, and the caps are exactly 200 lines and 25,000 UTF-16 units; whichever
+closes first binds. Checked against live Claude Code 2.1.293 sessions on 9 files (LF, CRLF, trailing
+blank lines, exactly 25,000 and 25,001 units, emoji near the cap): the prediction matched all 9.
 
 Discussion: [anthropics/claude-code#82056](https://github.com/anthropics/claude-code/issues/82056).
 
