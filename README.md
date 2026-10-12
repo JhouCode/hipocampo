@@ -238,6 +238,15 @@ The real memories, map, baton and rulers stay private.
 
 ## Known limits
 
+- The numbers in `docs/` come from one installation where Claude Code runs from the filesystem
+  root (`/`), not from a project folder, and most of the files worked on live on other hosts,
+  reached over ssh. Two things follow. From `/`, every project's `CLAUDE.md` is a nested one and
+  loads only when something under it is read ([`CONTEXTO.md` §2.2](docs/CONTEXTO.md)); a session
+  started inside the repository gets it at startup. And one memory index serves every project, so
+  it is crowded: that is why projects are parked out of it ([`MEMORIA.md` §5](docs/MEMORIA.md)),
+  and why the triggers match the Bash command text as well as `file_path`, since an edit over ssh
+  never passes through a local `Read` (`alvo_do_hook` in [`gatilho.py`](scripts/gatilho.py)).
+  Rates measured here are rates for that setup.
 - Selftests whose cases need a population a fresh clone does not have **skip** those cases and
   say so (`skipped: needs ...`), instead of failing: `memoria-recall.py` (a `user_profile.md` memory
   and real transcripts; 19 ok · 5 skipped in a fresh clone), `contexto-consumo.py` (real subagent
