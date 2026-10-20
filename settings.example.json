@@ -19,7 +19,6 @@
           { "type": "command", "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 1", "timeout": 10 },
           { "type": "command", "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 2", "timeout": 10 },
           { "type": "command", "command": "<YOUR_FOLDER>/scripts/mapa-hook.sh --parte 3", "timeout": 10 },
-          { "type": "command", "command": "<YOUR_FOLDER>/scripts/contexto-medir.py --devolver", "timeout": 20 },
           { "type": "command", "command": "python3 <YOUR_FOLDER>/scripts/bastao-entrega.py --emitir <YOUR_FOLDER>/docs/mesa/BASTAO.md", "timeout": 10 }
         ]
       },

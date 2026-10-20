@@ -72,8 +72,8 @@ that cut belongs to the measurement, not to the returner.
 USAGE
   contexto-medir.py --historico        scans every transcript and measures past compactations
   contexto-medir.py --sessao <id>      one session only
-  contexto-medir.py --devolver         returns the swallowed turns to the context (UserPromptSubmit /
-                                       SessionStart:compact — plain stdout becomes context)
+  contexto-medir.py --devolver         returns the swallowed turns to the context (UserPromptSubmit —
+                                       plain stdout becomes context)
   contexto-medir.py                    HOOK mode — syncs the ledger with the transcript
 """
 import json, os, re, sys, glob
@@ -504,7 +504,7 @@ def sincroniza(tp):
 
 
 def devolver():
-    """SessionStart:compact mode — returns to the context the turns the compaction swallowed.
+    """UserPromptSubmit mode — returns to the context the turns the compaction swallowed.
 
     WHY THIS EXISTS
       A turn CANNOT be marked as preservable. Measured over 28 compactions, preservation is pure
@@ -513,10 +513,17 @@ def devolver():
     wasted capacity: it was its CEILING.
       What can be done is BRING IT BACK. This mode measures the compaction (via `sincroniza`) and
     re-emits the swallowed turns through the channel that already returns the map (PLAIN STDOUT
-    becomes context at SessionStart and UserPromptSubmit). Measured cost: a median of 2 turns x 111
-    chars = ~56 tokens.
+    becomes context at UserPromptSubmit). Measured cost: a median of 2 turns x 111 chars = ~56
+    tokens.
       ⚠️ It no longer depends on `PostCompact`: that one fired BEFORE the new boundary was written
-    and measured the PREVIOUS compaction, and also raced this mode. See `sincroniza`.
+    and measured the PREVIOUS compaction, and it runs after the restore bundle. See `sincroniza`.
+      🚨 WHY NOT ALSO `SessionStart:compact` — it was registered there too, and it never returned
+    anything. The runtime awaits the restore bundle (where `SessionStart` runs) and then
+    `PostCompact`, and the boundary only reaches the transcript after both: at `SessionStart:compact`
+    the compaction that just happened does not exist yet. Measured 2026-10-20 over 221 compactions:
+    117 had turns to return, 117 came out on `UserPromptSubmit`, 0 on `SessionStart:compact`, with
+    `SessionStart` output landing in the transcript (1,792 map attachments) as the positive control.
+    The first prompt after the compaction is the earliest moment the return can happen.
 
     ⚠️ THE LINK IS NOT THE session_id — it CHANGES after the compaction, and matching by it would
     lose exactly the case that matters. It matches by `transcript_path`, which is stable — and ONLY

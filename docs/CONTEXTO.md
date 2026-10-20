@@ -152,8 +152,11 @@ the baton's shape — 1 pointer line on top, the live state right after, the rul
 ## 7 · `PostCompact` is not a channel — `SessionStart:compact` is
 
 > 🚨 **A `PostCompact` hook does NOT deliver context to the model.** To return content after a
-> compaction, use `SessionStart:compact`, which injects literally. The writer/returner pair
-> (`contexto-medir.py`) already does this — and the choice turned out to be mandatory, not preference.
+> compaction, use `SessionStart:compact`, which injects literally. The map and the baton already do
+> this — and the choice turned out to be mandatory, not preference. The exception is what depends on
+> the NEW boundary: it reaches the transcript only after the compaction hooks, so the returner of
+> swallowed turns (`contexto-medir.py --devolver`) runs on the first `UserPromptSubmit` (0 of 117
+> returns came out on `SessionStart:compact`, 2026-10-20).
 
 **The measurement.** A canary in `PostCompact` with an ID generated at firing time (`epoch+PID`), so
 that no text written before the event could contain it. Positive control of the EMITTER verified
