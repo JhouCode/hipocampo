@@ -12,6 +12,14 @@ out of date. This skill is that channel. The model it assumes: **the desk sessio
 designs; the worker session operates.** See [`docs/HIPOCAMPO.md`](../../docs/HIPOCAMPO.md),
 section 6.
 
+**The posts are assigned by cost, not by prestige.** The desk runs on the mid-priced model that
+designs well (here, Opus); the worker and the builder sub-agent it launches run on the cheaper one
+(Sonnet), because they execute a brief that is already decided; the most expensive model (Fable)
+is a consultant called on demand for one hard question, never a standing post. The read-only
+reviewers stay on the desk's model: validation is where a cheap verdict costs the most. The
+assignment changed four times before it settled; whoever proposes a new one reads why the last
+one fell first.
+
 ## 1 · The first act: read the OPEN
 
 | read | what | why |
