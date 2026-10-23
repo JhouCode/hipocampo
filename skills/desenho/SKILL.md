@@ -1,6 +1,6 @@
 ---
 name: desenho
-description: Information skill for the DESK (the session where the operator thinks: brainstorm, drawing board, design decisions). Invoke when opening any brainstorm, drawing board or design decision. It loads the DESIGN (docs/mesa/DESENHO.md, the OPEN items), makes the session declare its MODE before producing anything, and fixes the desk's borders (it thinks, designs and writes briefings; it does NOT operate).
+description: "Information skill for the DESK (the session where the operator thinks: brainstorm, drawing board, design decisions). Invoke when opening any brainstorm, drawing board or design decision. It loads the DESIGN (docs/mesa/DESENHO.md, the OPEN items), makes the session declare its MODE before producing anything, and fixes the desk's borders (it thinks, designs and writes briefings; it does NOT operate)."
 ---
 
 # Desenho: the information the desk was missing
