@@ -237,6 +237,15 @@ If you keep a trigger source for parked projects under `docs/gatilhos/`, its lin
 file must move together: the script prints a reminder on every park and resume, because the
 trigger's match (which paths belong to the project) cannot be derived from the slug.
 
+**What parking does, measured** (one store, 2026-10-12, `scripts/memoria-recall.py` over 225
+transcripts): inside the index, **163 of 280** memories had been opened at least once (58%); of the
+176 that left it with parked projects, **at most 8** were opened afterwards (4.5%, a ceiling). A memory
+outside the index is invisible, which is the point for a parked project and the reason a memory that
+serves only on one path goes to a trigger instead ([`gatilhos/memoria.md`](gatilhos/memoria.md)).
+Parking two large projects took the index from **93.7% to 71.5%** of the size cap. That is also a cost
+cut: the index is paid on **every request** (1.4 to 2.2% of all input over the article's window,
+[`data/custo_indice.csv`](../data/custo_indice.csv)), and so is anything a hook puts back.
+
 ## 6 · The mirror -- a backup of the memory
 
 The memory folder lives outside every repository. A rebuild that restores the machine and the hooks

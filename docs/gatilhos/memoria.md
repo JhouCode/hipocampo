@@ -17,6 +17,14 @@
 > `rides` measures whether the memory is really on the path. **A high ride count here is a sign of
 > promotion**: a cold memory that lights every week deserves its index line back.
 >
+> **MEASURED** (one store, 2026-08-14 to 2026-10-13): the source fired **501** times across 211
+> sessions (once per memory per session; 37 memories had a trigger). The full memory was opened in
+> the same session in **at most 12 of 495** firings (2.4%, a ceiling) -- the line was enough, which is
+> the design working. The injected line has a median of **172** characters; the memory body, 2,275.
+> Over the 501 firings the lines came to 79 thousand characters; the bodies would have been 1.68
+> million. Three patterns accounted for half the firings: the promotion signal. And the count proves
+> the hook **emitted**, not that the model read it.
+>
 > **What does NOT go here:** a method memory (it holds on any path -- that belongs to the map) and a
 > memory whose trigger is an EVENT, not a file. An item without a real `when it matches` would be
 > documentation dressed as a trigger, and the parser would accept it silently.

@@ -16,6 +16,9 @@ What transfers is the structure — regimes, slices, the escalator, the revolvin
 guards. The content (the real memories, the real map, the real baton) stays private; each piece
 ships with a **mold** and invented example content.
 
+**Came here from a thread?** The [FAQ](docs/FAQ.md) answers the questions people asked there, with
+the measurement and the code behind each answer.
+
 Written and tested on Linux. Dependencies: **bash**, **python3** (standard library only) and **git**,
 plus the usual GNU userland the scripts call (`awk`, `sed`, `grep`, `cut`, `tr`, `wc`, `head`,
 `tail`, `tac`, `seq`, `cksum`, `mktemp`, `find`, `date`). `scripts/memoria-espelho.sh` also uses
@@ -58,6 +61,7 @@ the map hook reads its JSON through python3.
 | `guards/check-private.py`, `.githooks/pre-commit` | this repository's own guard against private data |
 | `tests/smoke.sh` | the reproduction smoke test: fake `HOME`, assemble the example, run every proof |
 | `data/` | the aggregated measurements behind the article's figures |
+| `docs/FAQ.md` | the questions people asked in public threads, each answered in a few lines and routed to the doc that holds the measurement |
 
 File and folder names are kept in Portuguese where the article and the scripts cite them
 (`docs/mapa/`, `docs/gatilhos/`, `docs/mesa/BASTAO.md`, `scripts/gatilho.py`...). Glossary:

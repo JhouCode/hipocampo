@@ -140,6 +140,13 @@ claim cites.
 | preview cut | pulled back to the last `\n` **when it falls after unit 1,000**; otherwise a hard cut | same function; checked against every real preview by `bastao-entrega.py --validar` |
 | preview in bytes | median **2,070 B** | includes the 3 B of the `...` the runtime appends — it is not a fixed byte count |
 | astral characters | count **2** units each | UTF-16 surrogate pairs |
+| how often it happens | **256** outputs over the cap, in 139 sessions: `PostToolUse` 113 · `SessionStart:compact` 100 · `UserPromptSubmit` 43 | every transcript on one machine, by 2026-10-08 |
+| read back from disk | **at most 7 of 210** saved outputs were opened afterwards | same population |
+
+**The full output is recoverable, and in practice it is not recovered.** The preview names the file
+where the whole output was saved, but the model only goes looking when it notices something is
+missing, and the hook record still says success. Keeping every injected payload under the cap is the
+fix; relying on the read-back is not.
 
 **Consequence for anything injected by hook:** what must arrive has to sit in the first 2,000 units,
 or the whole output has to stay under 10,000. A fixed head at the top of an injected file (2,130 B)
@@ -204,6 +211,33 @@ another platform still stands — what was measured here is *propagation*. They 
 
 Published in [anthropics/claude-code#77832](https://github.com/anthropics/claude-code/issues/77832).
 
+### On a SUBAGENT's compaction it lands in the SUBAGENT — with the main session's payload
+
+When a subagent auto-compacts, `SessionStart:compact` fires for it, and the payload carries the
+**main** session's `session_id` and `transcript_path`, with no `agent_id` (reported in
+[anthropics/claude-code#91910](https://github.com/anthropics/claude-code/issues/91910)). Measured over
+848 subagent transcripts on one machine (2026-10-23):
+
+| question | answer |
+|---|---|
+| subagent auto-compactions | **97**, in 81 subagent transcripts |
+| where the output landed | inside the **subagent's** transcript, **81 of 81** |
+| did the main transcript get anything within 2 min? | **no, 96 of 97** (the exception is a main compaction at the same moment) |
+| negative control: subagents that never compacted | **0** `SessionStart` attachments in 767 |
+| `UserPromptSubmit` output | **3,848** attachments in main transcripts, **0** in the 848 subagent ones |
+
+**The text goes to the right agent; the decisions do not.** Everything a hook decides from its payload
+is decided about the main session. The case that proved it: the returner of swallowed turns was then
+also registered on `SessionStart:compact`. A subagent compacted, the hook received the main
+transcript's path, found the main session's pending turns, emitted them **into the subagent** and
+marked them returned. The main session never got them, and the ledger said returned.
+
+> 🚨 **The rule: nothing that consumes or writes state runs on a compaction event.** It runs on
+> `UserPromptSubmit`, which only the main loop fires. On `SessionStart:compact` only what is
+> read-only and right in either agent: the map (rules a subagent should have anyway) and a printout of
+> the baton. That layer is not small — a median of ~39k characters per subagent compaction, in slices
+> under the cap — and it is paid only when a subagent compacts.
+
 ---
 
 ## 8 · The baton — the deterministic handoff between contexts
@@ -231,10 +265,11 @@ deliver and fails when the delivery carries no live state.
 
 ---
 
-## 9 · The index cap warnings are BOTH write-time
+## 9 · The index cap warnings: the APPROACHING ones are write-time
 
-> 🚨 **No `MEMORY.md` warning reaches a session that only READS the index.** Both exist, and both
-> fire on `PostToolUse:Edit`. A session that does not edit the index is never warned of anything.
+> 🚨 **No *approaching-the-cap* warning reaches a session that only READS the index.** Both exist,
+> and both fire on `PostToolUse:Edit`. A reading session learns of the cap only once it is already
+> past it: the overflow warning rides inside the index itself, after the last line that fit (§11).
 
 ```
 "...MEMORY.md is 174 lines, approaching the 200-line read limit"   -> PostToolUse:Edit
@@ -245,7 +280,8 @@ deliver and fails when the delivery carries no live state.
 `attachment: hook_additional_context` — they reach the model's context when they fire.
 
 ⚠️ **The name lies: the warning is called `200-line read limit` and the trigger is the WRITE.** Count
-on a warning only for whoever **edits** the index — whoever only reads passes the cap seeing nothing.
+on an early warning only for whoever **edits** the index — whoever only reads gets no warning until
+lines are already cut.
 
 **The ruler is [`scripts/memory-cap-probe.py`](../scripts/memory-cap-probe.py)** — the six defects of
 its v1 and v2 are named in its header. ⚠️ It is **arithmetic on the file**: it predicts the cut, it does
@@ -269,7 +305,6 @@ Discussion: [anthropics/claude-code#82056](https://github.com/anthropics/claude-
 | we do not have | what was tried | why it failed |
 |---|---|---|
 | **a headless behavioural arm** | `claude -p` to run probes | the CLI was not authenticated for `-p`; the recorded answer is `<synthetic>`. The only way is an interactive session with a human reading the screen |
-| **the second cap string** (`Only part of it was loaded`) | search over **647 transcripts** | **0 occurrences** — the index never really overflowed. When it fires is unknown |
 | **a store outside a git repo** | — | the docs say *"outside a git repo, the project root is used instead"*. **Not tested.** Whether two non-repo folders under a common parent share a store is open |
 | **semantic duplication between collection and resident** | lexical detector: does the memory's name appear in the map/oracle? | **the positive control did NOT light** — the map distills without citing. It needs semantic comparison |
 | **why 119 memories were never opened** | hypothesis: compressing the index degraded recall | **refuted, in the opposite direction**: announced alone, **59.4%** never opened (19/32) against **53.5%** of the compressed ones (46/86). A long description does not protect. **No measured explanation** |
@@ -304,3 +339,47 @@ marker with its own ordinal and see whether it is enumerated.
   and a session that works through the shell or a database never matches any pattern. `gatilho.py`
   matches against the **whole command** — strictly better. Migrating to the native one would be a
   regression.
+
+---
+
+## 11 · What the index delivered — the `instructions` record
+
+> 🚨 **The transcript records the index delivery, and that record is the proof that it arrived.** A
+> hook's `hook_success` proves only that the hook ran; this record shows what the model was given.
+
+Since 2026-09-03 the runtime writes an `instructions` attachment listing each memory file it loaded,
+with its content. Measured on one machine that runs Claude Code from `/`, with no user `CLAUDE.md`
+(see the README's [known limits](../README.md#known-limits)):
+
+| question | answer | population |
+|---|---|---|
+| did the index arrive? | **yes, 76 of 76** sessions with at least one model reply | 2026-09-03 to 2026-10-01 |
+| what is in the record | **1 entry, `AutoMem` `MEMORY.md`, in 596 of 596** | 122 transcripts, 2026-09-05 to 2026-10-22 |
+| records tagged `compaction` / `session_start` | **166 of 166** carry an index that changed since its previous copy | same |
+| untagged records | 174 changed · **134 identical** · 122 first copies | same |
+
+In a setup run from a project folder, `User` and `Project` entries share the record with the index;
+here it never held anything else, which is what makes it a clean read of the index alone.
+
+### When the index overflows, the record says so — and quotes the first lost line
+
+Measured on a throwaway project, Claude Code 2.1.286:
+
+- **line cap** (267 lines): the entry holds lines 1–200, a blank line, then
+  `> WARNING: MEMORY.md is 267 lines (limit: 200). Only part of it was loaded: 67 of 267 lines were cut off, starting at line 201 ("…")`;
+- **size cap** (151 lines, 31 KB): the cut falls on a whole line, and the warning reads
+  `MEMORY.md is 30.5KB (limit: 24.4KB)`.
+
+### Two traps for a canary that checks this record
+
+1. **The warning quotes the first cut line.** A canary sitting exactly on line 201 is found by a plain
+   `canary in content` — inside the warning. Search only the part before `> WARNING`, or treat any
+   `> WARNING` in the entry as a failure on its own.
+2. **On the first prompt the record is not written yet.** In 50 of 56 sessions the `instructions`
+   attachment reached the transcript after the first prompt's `UserPromptSubmit` hooks had run, just
+   before the model's first reply. A canary hook that blocks on "not found" blocks a session whose
+   index arrived fine. Tell **not recorded yet** (stay silent, check on the next prompt) from
+   **recorded without the canary** (fail).
+
+Discussion: [anthropics/claude-code#82056](https://github.com/anthropics/claude-code/issues/82056) ·
+[anthropics/claude-code#99403](https://github.com/anthropics/claude-code/issues/99403).
