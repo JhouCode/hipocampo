@@ -524,6 +524,15 @@ def devolver():
     117 had turns to return, 117 came out on `UserPromptSubmit`, 0 on `SessionStart:compact`, with
     `SessionStart` output landing in the transcript (1,792 map attachments) as the positive control.
     The first prompt after the compaction is the earliest moment the return can happen.
+      And the SECOND reason, which weighs more than the first: there it LEAKS between agents. On a
+    SUBAGENT's compaction, `SessionStart:compact` runs with the MAIN session's `session_id` and
+    `transcript_path` (no `agent_id`, anthropics/claude-code#91910), and the output lands in the
+    subagent. Case of 2026-09-25: the main session's 2 swallowed turns came out INSIDE a subagent,
+    the record marked `devolvida=True`, and the main session never got them. Measured 2026-10-23 over
+    848 subagent transcripts: 97 compactions, output in the subagent 81 of 81, nothing in the main
+    session 96 of 97; `UserPromptSubmit` gave 3,848 attachments in main transcripts and 0 in
+    subagents. The rule: nothing that consumes or writes state runs on a compaction event. Do not
+    re-register it thinking the only cost was being useless.
 
     ⚠️ THE LINK IS NOT THE session_id — it CHANGES after the compaction, and matching by it would
     lose exactly the case that matters. It matches by `transcript_path`, which is stable — and ONLY
