@@ -405,8 +405,8 @@ CABECALHO = """# Source `porta` — the revolving door charging itself
 > next round, and that cannot depend on anyone remembering.
 >
 > **THIS FILE IS GENERATED. Do not edit it by hand** — the next run overwrites it. What you edit is
-> `porta.py`. The only thing preserved between runs is the `~~paid~~` rows, kept as proof that the
-> trigger worked.
+> `porta.py`. What is preserved between runs: the `~~paid~~` rows (kept as proof that the trigger
+> worked), the `rides` counter of each item, and a `⏸` wait marker put by hand in the `step` cell.
 >
 > **Why it collects instead of moving:** moving curated content is judgement. The pipeline derives
 > the destination from the layer's table and PROPOSES; a person writes the ruler. Automation that
@@ -452,6 +452,23 @@ def caronas_de(texto):
     return d
 
 
+def marcadores_de(texto):
+    """Preserves the WAIT marker of the `step` cell (`D1 ⏸evento 2026-09-30`), as `caronas_de`
+    preserves the counter. Phase B of the rides counter: the marker is put BY HAND in a GENERATED
+    source, and without this the next run of the `post-commit` hook would erase it silently -- the
+    wait would vanish and the frozen rides would go back to adding and blocking, with nobody having
+    decided. Returns only the suffix from the `⏸` on; the kind (`D1`/`RULE`) keeps coming from the
+    generator."""
+    d = {}
+    for l in texto.splitlines():
+        if not l.startswith("|"):
+            continue
+        p = _celulas(l)
+        if len(p) >= 7 and p[1].startswith("**") and "⏸" in p[5]:
+            d[p[1].strip("*")] = p[5][p[5].index("⏸"):].strip()
+    return d
+
+
 def _esc(t):
     r"""The `|` of an ERE alternation BREAKS THE COLUMN of the table — the `gatilho.py` parser counts
     raw pipes and DISCARDS the whole row, warning but discarding. Measured: two regexes with
@@ -463,13 +480,18 @@ def _esc(t):
 def escreve(itens):
     antigas = FONTE.read_text(encoding="utf-8") if FONTE.exists() else ""
     car = caronas_de(antigas)
+    esp = marcadores_de(antigas)
     pagas = linhas_pagas()
     out = [CABECALHO.rstrip("\n")]
     for it in itens:
         n = car.get(it["id"], "0")
+        # A RULE takes no wait (it does not escalate anyway) -- the marker only comes back on a debt.
+        degrau = it["degrau"]
+        if it["id"] in esp and degrau != "RULE":
+            degrau = "%s %s" % (degrau, esp[it["id"]])
         out.append("| **%s** | `%s` | %s | %s | %s | %s |" %
                    (it["id"], _esc(it["casa"]), _esc(it["diz"]), _esc(it["passo"]),
-                    it["degrau"], n))
+                    degrau, n))
     out.extend(pagas)
     FONTE.parent.mkdir(parents=True, exist_ok=True)
     FONTE.write_text("\n".join(out) + "\n", encoding="utf-8")
@@ -507,6 +529,28 @@ def selftest():
         else:
             ruim += 1
             print("  \033[31m✗\033[0m %s %s" % (rot, extra))
+
+    #   The WAIT survives regeneration (phase B of the rides counter, 2026-09-30). Runs FIRST and on a
+    # TEMPORARY source: it does not depend on the tree (a mutant fixture runs in an empty repo) and
+    # it does not write the real `porta.md`.
+    global FONTE
+    import tempfile
+    _guarda = FONTE
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            FONTE = Path(td) / "porta.md"
+            FONTE.write_text(CABECALHO +
+                             "| **PX** | `x` | says | step | D1 ⏸evento 2026-09-30 | 7 |\n"
+                             "| **PY** | `y` | says | step | D1 | 2 |\n", encoding="utf-8")
+            escreve([{"id": i, "casa": i.lower(), "diz": "says", "passo": "step", "degrau": "D1"}
+                     for i in ("PX", "PY")])
+            _deg = {p[1].strip("*"): p[5] for p in map(_celulas, FONTE.read_text().splitlines())
+                    if len(p) >= 7 and p[1].startswith("**")}
+    finally:
+        FONTE = _guarda
+    diz(_deg.get("PX") == "D1 ⏸evento 2026-09-30",
+        "the ⏸ marker of the step survives regeneration", "(PX=%r)" % _deg.get("PX"))
+    diz(_deg.get("PY") == "D1", "and an item without a marker stays plain D1 (control)", "(PY=%r)" % _deg.get("PY"))
 
     itens = monta()
     ids = [i["id"] for i in itens]

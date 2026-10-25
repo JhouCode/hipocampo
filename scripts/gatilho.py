@@ -22,6 +22,10 @@ THE THREE STEPS -- escalation replaces the pivot
   Promotion belongs to the COUNTER, not to the agent. D1 failing PRODUCES D2; D2 failing PRODUCES
   D3. No step depends on the agent noticing that the previous one failed and changing plans.
 
+  A debt that WAITS for something else (`D1 ⏸<ID>`, `D1 ⏸dele <date>`, `D1 ⏸evento <date>` in the
+  `step` column) had no opportunity to pay: D1 warns, D2 does not add, D3 does not block. See the
+  section "the wait" below and `docs/gatilhos/backlog.md`.
+
   The three live on DIFFERENT EVENTS on purpose (see `docs/gatilhos/CANAIS.md`): an update that
   closes one channel takes down one step, not the ladder.
 
@@ -113,11 +117,127 @@ def le_fontes(dir_fontes=None):
                 except re.error as e:
                     problemas.append(f"{fonte}#{it['id']}: invalid regex ({e})")
                     it["padrao"] = None
+            # THE WAIT (phase B, 2026-09-30): the field is only born when the cell has `⏸`. An item
+            # without the marker comes out byte for byte as before -- the differential proves it.
+            esp = le_espera(it["degrau"])
+            if esp:
+                it["espera"] = esp
             itens.append(it)
         lidos = len([i for i in itens if i["fonte"] == fonte])
         if lidos != candidatas:
             problemas.append(f"{fonte}: {lidos} items read from {candidatas} table lines")
+    resolve_esperas(itens)
     return itens, problemas
+
+
+# ---------------------------------------------------------------- the wait (phase B)
+#   PHASE A FINDING, 2026-09-30: of the 12 items that sat in D3, 7 had a next step that DEPENDED ON
+# SOMETHING ELSE -- another item, a run, a piece of work, a decision of the owner's. A ride charged
+# there measures "I touched the file", not "I had a chance to pay and did not": the defect that
+# `escrita_do_item` fixes, coming in through another door. The law stays the same -- a ride only
+# counts when there was an OPPORTUNITY to pay -- and a debt that waits for something else has none.
+#   The MARKER lives in the `step` column, after the kind: `D1 ⏸DEBT-02` (another item, from any
+# source), `D1 ⏸dele 2026-09-30` (a decision of the owner's), `D1 ⏸evento 2026-09-30` (a run, a
+# piece of work, a fact of the world). The date is the day the wait was declared. WHAT is awaited
+# stays in the NEXT STEP: the marker is for the machine, the sentence is for people. `RULE` takes
+# no wait (it does not escalate anyway) -- if it carries one, that is a defect.
+#   Wait OPEN: D1 keeps warning (with `⏸`), D2 does not add, D3 does not block; the old rides stay
+# in the cell, frozen. Wait CLOSED (the target was struck through): everything counts again.
+_ESPERA = re.compile(r"(\S+)\s+⏸\s*(?:(dele|evento)\s+(\d{4}-\d{2}-\d{2})|([A-Za-z][A-Za-z0-9_-]*))")
+DIAS_ESPERA_AMARELA = 21     # a `dele`/`evento` wait older than this becomes a tombstone: yellow
+
+
+def _id_nu(i):
+    """The id without table markup: `**DEBT-02**`, `~~DEBT-02~~` and `~~**DEBT-02**~~` are the same item."""
+    return re.sub(r"[*~\s]", "", i or "")
+
+
+def le_espera(degrau):
+    """Reads the `⏸` marker from the `step` cell. Without `⏸` returns None (the item changes in nothing).
+
+    With `⏸` but outside the grammar, returns type `invalida` -- a crooked marker must not become a
+    silent open wait (that would be D3 disarmed by a typo), nor vanish (that would be a marker
+    written and ignored). It comes out as a CLOSED wait and a defect, and the selftest accuses it.
+    """
+    if "⏸" not in (degrau or ""):
+        return None
+    m = _ESPERA.fullmatch(degrau.strip())
+    if not m:
+        return {"tipo": "invalida", "alvo": degrau.strip(), "desde": None}
+    if m.group(2):
+        try:
+            import datetime
+            datetime.date.fromisoformat(m.group(3))
+        except ValueError:
+            return {"tipo": "invalida", "alvo": degrau.strip(), "desde": None}
+        return {"tipo": m.group(2), "alvo": m.group(2), "desde": m.group(3), "grau": m.group(1)}
+    return {"tipo": "item", "alvo": m.group(4), "desde": None, "grau": m.group(1)}
+
+
+def resolve_esperas(itens):
+    """Decides `espera_aberta` for each marked item -- it needs ALL the sources read.
+
+    `⏸<ID>`: open while the target exists in some source and is not paid. A target that exists in
+    no source = CLOSED and a defect (`esperas_defeituosas`). `dele`/`evento`: open until someone
+    removes the marker by hand. `invalida` and a RULE with a marker: closed (everything counts)
+    and a defect.
+    """
+    por_id = {}
+    for it in itens:
+        por_id.setdefault(_id_nu(it["id"]), []).append(it)
+    for it in itens:
+        esp = it.get("espera")
+        if not esp:
+            continue
+        if esp["tipo"] == "invalida" or e_regra_tipo(esp.get("grau")):
+            it["espera_aberta"] = False
+        elif esp["tipo"] == "item":
+            alvos = [a for a in por_id.get(_id_nu(esp["alvo"]), []) if a is not it]
+            esp["existe"] = bool(alvos)
+            it["espera_aberta"] = any(not a["pago"] for a in alvos)
+        else:
+            it["espera_aberta"] = True
+
+
+def e_regra_tipo(grau):
+    return (grau or "").strip().upper() == "RULE"
+
+
+def esperas_defeituosas(itens):
+    """What the selftest (and through it the CI) accuses RED: `⏸<ID>` with no target in any source,
+    a marker outside the grammar, and a RULE with a marker. A paid item is out of circulation."""
+    ruins = []
+    for it in itens:
+        esp = it.get("espera")
+        if not esp or it["pago"]:
+            continue
+        if esp["tipo"] == "invalida":
+            ruins.append(f"{it['fonte']}#{it['id']}: marker outside the grammar: {esp['alvo']!r}")
+        elif e_regra_tipo(esp.get("grau")):
+            ruins.append(f"{it['fonte']}#{it['id']}: a RULE takes no wait (it does not escalate anyway)")
+        elif esp["tipo"] == "item" and not esp.get("existe"):
+            ruins.append(f"{it['fonte']}#{it['id']}: ⏸{esp['alvo']} does not exist in any source")
+    return ruins
+
+
+def esperas_vencidas(itens, hoje=None):
+    """A `dele`/`evento` wait older than DIAS_ESPERA_AMARELA days: YELLOW, not red -- the wait may
+    be legitimate, but a wait nobody revisits becomes a tombstone."""
+    import datetime
+    hoje = hoje or datetime.date.today()
+    velhas = []
+    for it in itens:
+        esp = it.get("espera")
+        if not esp or it["pago"] or esp["tipo"] not in ("dele", "evento"):
+            continue
+        dias = (hoje - datetime.date.fromisoformat(esp["desde"])).days
+        if dias > DIAS_ESPERA_AMARELA:
+            velhas.append((it, dias))
+    return velhas
+
+
+def rotulo_espera(esp):
+    return esp["alvo"] if esp["tipo"] == "item" else f"{esp['tipo']} since {esp['desde']}"
 
 
 def parte_linha(linha):
@@ -150,15 +270,27 @@ def alvo_do_hook(d):
 
 
 # Signs that the command WRITES. Outside this list, Bash is treated as a read.
-_ESCREVE = re.compile(
+#   Split in two pieces since 2026-09-30 (see `escrita_do_item`): the VERB that writes (the file is
+# its operand) and the REDIRECTION (the file is what comes after the `>`). `_ESCREVE` is still the
+# union of the same signs as before (only the order of the alternatives changed, and order does not
+# change a `search`) -- it is what `e_escrita` uses.
+_ESCREVE_VERBO = (
     r"(^|[;&|]\s*)(vim?|nano|emacs|tee|cp|mv|rm|mkdir|touch|chmod|chown|install|patch|dd)\b"
-    # Redirection to a FILE. Excludes `2>&1` and `>/dev/null`: sending output to the bin is a pure
-    # read, and an `ls ... 2>/dev/null` charged an undue ride in the second round exactly that way.
-    r"|>>?\s*(?!&)(?!/dev/(null|stderr|stdout))[^\s;|&]"
     r"|\bsed\b[^|;]*-i"                   # sed in-place
     r"|\bgit\s+(commit|push|checkout|merge|rebase|apply|revert|reset)\b"
+)
+# Redirection to a FILE. Excludes `2>&1` and `>/dev/null`: sending output to the bin is a pure
+# read, and an `ls ... 2>/dev/null` charged an undue ride in the second round exactly that way.
+_REDIRECAO = r">>?\s*(?!&)(?!/dev/(null|stderr|stdout))[^\s;|&]"
+_ESCREVE = re.compile(
+    _ESCREVE_VERBO + "|" + _REDIRECAO +
     r"|\bcat\s*<<"                        # heredoc writing a file
 )
+_VERBO = re.compile(_ESCREVE_VERBO)
+_DESTINO = re.compile(r">>?\s*(?!&)(?!/dev/(?:null|stderr|stdout))([^\s;|&]+)")
+# Opening of a heredoc: `<<EOF`, `<<-EOF`, `<<'EOF'`, `<<"EOF"`, `<<\EOF`. It does not match a
+# here-string (`<<<`) nor a bit shift by a number (`1<<3`).
+_HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)\s*(['\"]?)\\?([A-Za-z_][A-Za-z0-9_]*)\2")
 
 
 def e_escrita(d):
@@ -186,6 +318,43 @@ def segmentos(cmd):
     return [s for s in re.split(r"[;\n]|&&|\|\||\|", cmd) if s.strip()]
 
 
+def sem_corpo_de_heredoc(cmd):
+    """The command without the BODY of its heredocs: the body is DATA, not a command.
+
+    The line that OPENS the heredoc stays (`cat > file <<EOF` is a command and writes `file`); the
+    lines up to the delimiter leave. Delimiter as bash demands: the EXACT line (with `<<-`, without
+    the leading TABs). A heredoc with no closing line runs to the end of the command, as in bash.
+    The same defect had already been measured and fixed in `memoria-recall.py` (`_sem_heredoc`),
+    which CONSUMES this module -- the fix stayed in the consumer and the owner of the rule went on
+    counting heredoc bodies as commands.
+    """
+    fora, pendentes = [], []
+    for linha in cmd.split("\n"):
+        if pendentes:
+            tira_tab, delim = pendentes[0]
+            if (linha.lstrip("\t") if tira_tab else linha) == delim:
+                pendentes.pop(0)
+            continue
+        fora.append(linha)
+        for m in _HEREDOC.finditer(linha):
+            pendentes.append((m.group(1) == "-", m.group(3)))
+    return "\n".join(fora)
+
+
+def _escreve_no_item(seg, padrao):
+    """Does this SEGMENT write to the item's file?
+
+    A write VERB (`sed -i`, `cp`, `git commit`...) in a segment that cites the item: counts, as it
+    always did. A REDIRECTION only counts if the DESTINATION of the `>` matches the item --
+    `bash run-checks.sh > log` runs the item and writes the LOG.
+    """
+    if not re.search(padrao, seg):
+        return False
+    if _VERBO.search(seg):
+        return True
+    return any(re.search(padrao, m.group(1).strip("'\"")) for m in _DESTINO.finditer(seg))
+
+
 def escrita_do_item(d, it):
     """Did THIS item match in a WRITE segment? -- the command having some write is not enough.
 
@@ -193,6 +362,27 @@ def escrita_do_item(d, it):
     ride on the backup item: the `cp` marked the whole command as a write and the MENTION of
     `backup.sh` in the `ls` matched the item. A write in one piece contaminated the read in
     another -- and a ride only counts when there was an opportunity to pay IN THAT file.
+
+    FOURTH FINDING, 2026-09-30 (blast radius of one debt: 77 of its 79 rides rebuilt from the hook's
+    own receipts in the transcripts). Two causes, both measured:
+      (1) HEREDOC BODY read as a command -- `segmentos()` splits on newline, so each line of the
+          body became a segment: 12 false rides (backlog text, a prompt, a commit message).
+      (2) REDIRECTION that writes ANOTHER file -- `bash scripts/run-checks.sh --tree > log` matched
+          the item (run-checks) and the `>` (of the log): 9 false rides, 3 of them on that debt;
+          plus 4 more from a `>` inside quoted text (`'> *80'`, `<->`, `map<a, b> x`), which the
+          same test covers.
+      ERRING LOW, declared: a `python3 - <<EOF` that writes the item's file through `open()` stops
+    counting -- in the measurement, 6 real rides had matched only through the body. And these stay
+    OUTSIDE this fix, measured: a write verb inside quoted text (`grep '...git checkout...'`, 2),
+    `git add`/`git reset` of the index only (2) and a homonymous copy (`> scratch/Router.cpp`, the
+    `.git/hooks/pre-commit` of a throwaway repo, 2) -- and 1 pattern too wide (`Route` matches
+    `Router.cpp`), which is data in the source, not in the engine.
+      ERRING LOW, declared (reported from outside, 2026-10-25): `segmentos()` keeps the space after
+    `&&`/`;`, and the verb anchor is `^` or a separator, so a write verb at the START of a later
+    piece is not seen -- `cd d && cp x item` does not count. Kept on purpose: the touch warning (D1)
+    does not go through this judgment and still fires, so the gap can delay a charge, never hide a
+    debt. Stripping each piece alone would make `cp item /tmp/x` (the item as SOURCE, a read) a
+    write, the costly side; the fix, if it comes, is cp/mv judged by destination first.
     """
     nome = d.get("tool_name") or ""
     if nome in ("Edit", "Write", "NotebookEdit"):
@@ -200,7 +390,7 @@ def escrita_do_item(d, it):
     if nome != "Bash" or not it.get("padrao"):
         return False
     cmd = (d.get("tool_input") or {}).get("command") or ""
-    return any(re.search(it["padrao"], seg) and _ESCREVE.search(seg) for seg in segmentos(cmd))
+    return any(_escreve_no_item(seg, it["padrao"]) for seg in segmentos(sem_corpo_de_heredoc(cmd)))
 
 
 def e_regra(it):
@@ -321,9 +511,20 @@ def d1_avisa(d, itens):
             perdidas = f" · seen {it['caronas_n']}×" if it["caronas_n"] else ""
             if it in reavisar:
                 perdidas += " · 🚨 NOW IT IS A WRITE -- before you had only READ"
+        elif it.get("espera_aberta"):
+            # Open wait: it warns, but it is no step at all -- the rides are FROZEN.
+            grau = f"⏸ waiting {rotulo_espera(it['espera'])}"
+            perdidas = f" · {it['caronas_n']} frozen ride(s)" if it["caronas_n"] else ""
         else:
             grau = "D3" if it["caronas_n"] >= TETO_D3 else ("D2" if it["caronas_n"] >= 1 else "D1")
             perdidas = f" · {it['caronas_n']} missed ride(s)" if it["caronas_n"] else ""
+            esp = it.get("espera")
+            if esp and esp["tipo"] == "item" and esp.get("existe"):
+                perdidas += (f" · ✅ the wait ⏸{esp['alvo']} CLOSED (the target was paid): charging"
+                             f" is back -- remove the marker")
+            elif esp:
+                perdidas += (f" · 🔴 wait ⏸{rotulo_espera(esp)} with a DEFECT (missing target or"
+                             f" crooked marker): it counts as closed")
         partes.append(f"⚠️ [{it['fonte']} #{it['id']} · {grau}{perdidas}] {it['dizer']}\n"
                       f"   NEXT STEP: {it['proximo']}")
     return "\n".join(partes)
@@ -355,6 +556,10 @@ def d2_cobra(d, itens):
         if not it or it["pago"]:
             estado[k]["estado"] = "pago"
             continue
+        if it.get("espera_aberta"):
+            # A debt that WAITS for something else had no opportunity to pay: no ride (phase B).
+            estado[k]["estado"] = "espera"
+            continue
         if e_regra(it):
             # A RULE does not accumulate towards blocking -- see `e_regra`. The counter becomes a
             # metric: high there means "this rule lives on my path", not "debt overdue".
@@ -383,8 +588,10 @@ def d3_barra(d, itens):
     # Only a WRITE on the item's file blocks -- the same criterion that counts the ride
     # (`escrita_do_item`). Without this, a `grep`/`sed -n` on a file asked for `ask` over an
     # overdue debt, and reading was never an opportunity to pay. The read stays WARNED by D1.
+    # An OPEN wait does not block, not even with the old rides above the ceiling (phase B).
     duros = [it for it in casa(itens, alvo)
-             if it["caronas_n"] >= TETO_D3 and not e_regra(it) and escrita_do_item(d, it)]
+             if it["caronas_n"] >= TETO_D3 and not e_regra(it) and not it.get("espera_aberta")
+             and escrita_do_item(d, it)]
     if not duros:
         return None
     it = max(duros, key=lambda x: x["caronas_n"])
@@ -486,6 +693,108 @@ def historico(dias, repo=None):
 
 # ---------------------------------------------------------------- guards
 
+def _selftest_espera(checa):
+    """The ruler of the wait (E1-E7), end to end: a synthetic source in a temporary directory ->
+    `le_fontes` -> D1 -> D2 (which WRITES to the source) -> D3. Nothing touches `docs/gatilhos/`:
+    `FONTES` and `CACHE` point to the temporary one while this lasts, and come back in the `finally`.
+      Each check runs inside `tenta`: a missing function or an exception is a FAILURE, not a fall
+    of the selftest -- that is how this block runs against the `gatilho.py` from before (the
+    red-before).
+    """
+    import datetime, tempfile
+    global FONTES, CACHE
+    guarda = (FONTES, CACHE)
+
+    def tenta(nome, f):
+        try:
+            cond = bool(f())
+        except Exception as e:
+            cond, nome = False, f"{nome} (exception: {type(e).__name__}: {e})"
+        checa(nome, cond)
+
+    cab = ("| id | when it matches | what to say | NEXT STEP | step | rides |\n"
+           "|---|---|---|---|---|---|\n")
+
+    def fonte(td, alvo_pago):
+        Path(td, "fake.md").write_text(cab + (
+            "| %s | `target\\.cpp` | the target | step of the target | D1 | 0 |\n" % ("~~**TGT**~~" if alvo_pago else "**TGT**")) +
+            "| **W1** | `wait1\\.cpp` | waits for the target | step that waits | D1 ⏸TGT | 0 |\n"
+            "| **W5** | `wait5\\.cpp` | waits for the target | step that waits | D1 ⏸TGT | 5 |\n"
+            "| **RL** | `rule\\.cpp` | rule | step of the rule | RULE | 2 |\n"
+            "| **DB** | `debt\\.cpp` | debt | step of the debt | D1 | 0 |\n"
+            "| **DB5** | `debt5\\.cpp` | debt | step of the debt | D1 | 5 |\n", encoding="utf-8")
+
+    def caronas(td, i):
+        return {x["id"]: x["caronas_n"] for x in le_fontes(td)[0]}[i]
+
+    def toque(sid, arq):
+        return {"session_id": sid, "tool_name": "Edit", "tool_input": {"file_path": arq}}
+
+    def turno(td, sid, arq):
+        """A whole turn: D1 on the write touch, D2 on the Stop. Returns the D1 warning."""
+        aviso = d1_avisa(toque(sid, arq), le_fontes(td)[0])
+        d2_cobra({"session_id": sid}, le_fontes(td)[0])
+        return aviso or ""
+
+    try:
+        CACHE = Path(tempfile.mkdtemp())
+        # ---- TGT OPEN: E1, E2, E6, E7
+        with tempfile.TemporaryDirectory() as td:
+            FONTES = Path(td)
+            fonte(td, alvo_pago=False)
+            aviso = turno(td, "e1", "src/wait1.cpp")
+            tenta("E1 · wait ⏸TGT open: D1 warns with `⏸`", lambda: "⏸" in aviso and "W1" in aviso)
+            tenta("E1 · wait ⏸TGT open: D2 does NOT add (0 → 0)", lambda: caronas(td, "**W1**") == 0)
+            tenta("E2 · open wait with 5 rides: D3 does NOT block",
+                  lambda: d3_barra(toque("e2", "src/wait5.cpp"), le_fontes(td)[0]) is None)
+            tenta("E2 · and the 5 rides stay FROZEN in the cell, they are not erased",
+                  lambda: caronas(td, "**W5**") == 5)
+            aviso_r = turno(td, "e6", "src/rule.cpp")
+            tenta("E6 · RULE without a marker same as before: warns, counts as metric (2 → 3), does not block",
+                  lambda: "RULE" in aviso_r and caronas(td, "**RL**") == 3
+                  and d3_barra(toque("e6b", "src/rule.cpp"), le_fontes(td)[0]) is None)
+            aviso_d = turno(td, "e7", "src/debt.cpp")
+            tenta("E7 · D1 without a marker same as before: warns without `⏸`, D2 adds (0 → 1)",
+                  lambda: "⏸" not in aviso_d and caronas(td, "**DB**") == 1)
+            tenta("E7 · D1 without a marker with 5 rides: D3 blocks (control of E2)",
+                  lambda: d3_barra(toque("e7b", "src/debt5.cpp"), le_fontes(td)[0]) is not None)
+        # ---- TGT STRUCK THROUGH: E3
+        with tempfile.TemporaryDirectory() as td:
+            FONTES = Path(td)
+            fonte(td, alvo_pago=True)
+            aviso = turno(td, "e3", "src/wait1.cpp")
+            tenta("E3 · TGT struck through: D2 adds again (0 → 1)", lambda: caronas(td, "**W1**") == 1)
+            tenta("E3 · TGT struck through: D3 blocks again with 5",
+                  lambda: d3_barra(toque("e3b", "src/wait5.cpp"), le_fontes(td)[0]) is not None)
+            tenta("E3 · and D1 says the wait CLOSED", lambda: "CLOSED" in aviso)
+        # ---- E4: a target that exists in no source, and a crooked marker
+        with tempfile.TemporaryDirectory() as td:
+            Path(td, "fake.md").write_text(cab +
+                "| **X1** | `x\\.cpp` | waits for nothing | step | D1 ⏸TX999 | 5 |\n"
+                "| **X2** | `t\\.cpp` | crooked marker | step | D1 ⏸dele yesterday | 0 |\n"
+                "| **X3** | `r\\.cpp` | rule with a wait | step | RULE ⏸TX999 | 0 |\n", encoding="utf-8")
+            it4 = le_fontes(td)[0]
+            tenta("E4 · ⏸TX999 (does not exist): accused", lambda: any("TX999" in r and "X1" in r
+                                                                    for r in esperas_defeituosas(it4)))
+            tenta("E4 · crooked marker and RULE with a wait: accused",
+                  lambda: len(esperas_defeituosas(it4)) == 3)
+            tenta("E4 · and the defect counts as a CLOSED wait: D3 blocks with 5",
+                  lambda: d3_barra(toque("e4", "src/x.cpp"), it4) is not None)
+        # ---- E5: a 30-day `dele` is yellow, a 3-day one is nothing
+        with tempfile.TemporaryDirectory() as td:
+            Path(td, "fake.md").write_text(cab +
+                "| **OLD** | `v\\.cpp` | old | step | D1 ⏸dele 2026-08-31 | 0 |\n"
+                "| **NEW** | `n\\.cpp` | new | step | D1 ⏸evento 2026-09-27 | 0 |\n", encoding="utf-8")
+            it5 = le_fontes(td)[0]
+            hoje = datetime.date(2026, 9, 30)
+            tenta("E5 · 30-day ⏸dele: yellow",
+                  lambda: [i["id"] for i, _ in esperas_vencidas(it5, hoje)] == ["**OLD**"])
+            tenta("E5 · 3-day ⏸evento: nothing, and both stay OPEN",
+                  lambda: all(i.get("espera_aberta") for i in it5) and not esperas_defeituosas(it5))
+    finally:
+        FONTES, CACHE = guarda
+
+
 def selftest():
     ok = ruim = 0
     def checa(nome, cond):
@@ -550,9 +859,58 @@ def selftest():
         ("grep x rebuild-from-scratch.sh | tee /tmp/o", it_rb, False, "tee writes /tmp/o; the item was only read"),
         ("sed -i s/a/b/ rebuild-from-scratch.sh", it_rb, True, "sed -i on the file itself"),
         ("ls backup.sh; echo hi > f", it_bk, False, "write in a segment WITHOUT the item"),
+        ("cd /srv && cp a.sh app/backup.sh", it_bk, False,
+         "DECLARED low-side miss: verb at the start of a later piece (see escrita_do_item)"),
     ]:
         checa(f"per-item · {'counts' if esperado else 'does NOT count'}: {porque}",
               escrita_do_item({"tool_name": "Bash", "tool_input": {"command": cmd}}, it) == esperado)
+
+
+    # -- HEREDOC BODY is data, and a REDIRECTION counts by its DESTINATION (2026-09-30) -----------
+    #    The last four are the shape of the commands that charged the four rides of one debt, taken
+    #    from the transcripts (the receipt of the Stop hook, `missed ride #N`). The measurement: #1
+    #    real (a commit of the checker), #2..4 ran the checker and wrote its LOG.
+    it_chk = {"id": "T_CHK", "pago": False,
+              "padrao": r"(run-checks|checks-derive|sql/rotation|ROTATION_PAIRS)"}
+    for cmd, esperado, porque in [
+        ("cat > /tmp/note.md <<'EOF'\nthe fix was: sed -i s/a/b/ scripts/run-checks.sh\nEOF",
+         False, "heredoc that CITES the pattern and writes another file"),
+        ("python3 - <<'PY'\np='docs/gatilhos/backlog.md'\nopen(p,'a').write('DEBT-07: bash run-checks.sh > log')\nPY",
+         False, "python heredoc writes the backlog quoting the item (the debt's own row)"),
+        ("cat > scripts/run-checks.sh <<'EOF'\n#!/bin/bash\necho hi\nEOF",
+         True, "`cat > <item file> <<EOF` -- the line that opens is still a command"),
+        ("cat <<-'EOF' > sql/rotation/pairs.sql\n\tINSERT 1;\n\tEOF\necho done > /tmp/x",
+         True, "`<<-` with the destination on the item counts; the TAB-indented closer closes"),
+        ("cat > /tmp/a <<'EOF'\nx\nEOF\nsed -i s/a/b/ scripts/run-checks.sh",
+         True, "a write AFTER the heredoc closes is a command again"),
+        ("bash scripts/run-checks.sh --tree > /tmp/checks.txt 2>&1",
+         False, "the redirection writes the LOG, the item only runs"),
+        ("git log -S \"map<uint64, uint32> x\" -- sql/rotation/a.sql",
+         False, "a `>` inside quoted text is not the item's destination"),
+        ("echo x >> sql/rotation/pairs.sql", True, "a redirection whose DESTINATION is the item counts"),
+        ("ssh buildhost 'cat > /srv/app/sql/rotation/x.sql'", True, "a quoted destination (ssh) counts"),
+        ("git commit --only -F /tmp/scratch/msg.txt -- scripts/run-checks.sh docs/guardas/INDEX.md"
+         " docs/gatilhos/backlog.md sql/_migrations/20260921_pair_by_faction.sql 2>&1 | tail -6"
+         " && echo \"=== left in the working tree (from another session, untouched):\" && git status --porcelain",
+         True, "ride #1: a commit of the checker -- real"),
+        ("S=/tmp/scratch; grep -nE 'slice|ceiling|9500|9.500' $S/selftest_before.txt | head -20;"
+         " head -12 $S/budget_before.txt; (timeout 900 bash scripts/run-checks.sh >"
+         " $S/checks_before.txt 2>&1; echo \"END=$?\" >> $S/checks_before.txt) ; tail -8 $S/checks_before.txt",
+         False, "ride #2: runs the checker, writes the log"),
+        ("git checkout e296382 -- tools/other-area && git status -s && md5sum tools/other-area/bridge.py | cut -c1-8"
+         " && ssh -q buildhost 'md5sum /srv/app/repo/tools/other-area/bridge.py' | cut -c1-8; ls"
+         " scripts/run-checks.sh && (bash scripts/run-checks.sh --staged > ../checks-up.log 2>&1; echo \"rc=$?\");"
+         " tail -15 ../checks-up.log",
+         False, "ride #3: checkout of ANOTHER area + checker > log"),
+        ("bash scripts/run-checks.sh --tree > /tmp/scratch/"
+         "checks.txt 2>&1; echo rc=$?; F=/tmp/scratch/"
+         "checks.txt; grep -c 'ceiling 80' $F; grep -c '✗' $F; grep '✗' $F | head -5; grep -c '✓' $F",
+         False, "ride #4: runs the checker, writes the log"),
+    ]:
+        checa(f"heredoc/destination · {'counts' if esperado else 'does NOT count'}: {porque}",
+              escrita_do_item({"tool_name": "Bash", "tool_input": {"command": cmd}}, it_chk) == esperado)
+    checa("heredoc · here-string `<<<` and `1<<3` do not open a body",
+          sem_corpo_de_heredoc("grep x <<< \"$v\"\necho $((1<<3))\nfim") == "grep x <<< \"$v\"\necho $((1<<3))\nfim")
 
     # -- RULE: a permanent item always warns and NEVER blocks ------------------------------------
     regra = [{"id": "R1", "fonte": "t", "linha_no": 1, "pago": False, "caronas_n": 9,
@@ -641,11 +999,27 @@ def selftest():
         checa("absence control · a directory without sources does not return a silent 0",
               le_fontes(Path(td) / "does-not-exist")[1] != [])
 
+    # -- the WAIT: a debt that waits for something else adds no ride (phase B) ------------------
+    _selftest_espera(checa)
+
     # -- the real sources -----------------------------------------------------------------------
     checa("sources readable (no parse problem)", not problemas)
     for p in problemas:
         print(f"      ⚠️ {p}")
     checa("at least one source has items", len(itens) > 0)
+    # E4 on the REAL sources: `⏸<ID>` that exists in no source, a crooked marker or a RULE with a
+    # wait = RED.
+    ruins = esperas_defeituosas(itens)
+    checa("E4 · every wait in the real sources points to an existing target and follows the grammar", not ruins)
+    for r in ruins:
+        print(f"      ✗ {r}")
+    marcados = [it for it in itens if it.get("espera") and not it["pago"]]
+    print(f"  ·· waits: {len([i for i in marcados if i.get('espera_aberta')])} open of "
+          f"{len(marcados)} marked")
+    # E5 on the real sources: YELLOW -- it prints, it does not fail.
+    for it, dias in esperas_vencidas(itens):
+        print(f"  🟡 {it['fonte']}#{it['id']}: wait ⏸{rotulo_espera(it['espera'])} for {dias} days"
+              f" (> {DIAS_ESPERA_AMARELA}) -- revisit: a wait must not become a tombstone")
 
     # -- the source CONTRACT: a new item is not born without classification nor without a way out
     sem_saida = [it for it in ativos if len(it["proximo"]) < 10 or it["proximo"] in ("—", "-")]

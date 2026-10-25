@@ -5,8 +5,8 @@
 > next round, and that cannot depend on anyone remembering.
 >
 > **THIS FILE IS GENERATED. Do not edit it by hand** — the next run overwrites it. What you edit is
-> `porta.py`. The only thing preserved between runs is the `~~paid~~` rows, kept as proof that the
-> trigger worked.
+> `porta.py`. What is preserved between runs: the `~~paid~~` rows (kept as proof that the trigger
+> worked), the `rides` counter of each item, and a `⏸` wait marker put by hand in the `step` cell.
 >
 > **Why it collects instead of moving:** moving curated content is judgement. The pipeline derives
 > the destination from the layer's table and PROPOSES; a person writes the ruler. Automation that
