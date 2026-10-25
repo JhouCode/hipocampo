@@ -380,8 +380,8 @@ def escrita_do_item(d, it):
       ERRING LOW, declared (reported from outside, 2026-10-25): `segmentos()` keeps the space after
     `&&`/`;`, and the verb anchor is `^` or a separator, so a write verb at the START of a later
     piece is not seen -- `cd d && cp x item` does not count. Kept on purpose: the touch warning (D1)
-    does not go through this judgment and still fires, so the gap can delay a charge, never hide a
-    debt. Stripping each piece alone would make `cp item /tmp/x` (the item as SOURCE, a read) a
+    does not go through this judgment and still fires on the touch, so the debt still arrives at
+    the moment it is cheapest to pay; the gap only undercounts the rides toward D3. Stripping each piece alone would make `cp item /tmp/x` (the item as SOURCE, a read) a
     write, the costly side; the fix, if it comes, is cp/mv judged by destination first.
     """
     nome = d.get("tool_name") or ""
