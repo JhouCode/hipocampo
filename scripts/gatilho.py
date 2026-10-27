@@ -381,8 +381,11 @@ def escrita_do_item(d, it):
     `&&`/`;`, and the verb anchor is `^` or a separator, so a write verb at the START of a later
     piece is not seen -- `cd d && cp x item` does not count. Kept on purpose: the touch warning (D1)
     does not go through this judgment and still fires on the touch, so the debt still arrives at
-    the moment it is cheapest to pay; the gap only undercounts the rides toward D3. Stripping each piece alone would make `cp item /tmp/x` (the item as SOURCE, a read) a
-    write, the costly side; the fix, if it comes, is cp/mv judged by destination first.
+    the moment it is cheapest to pay; the gap only undercounts the rides toward D3.
+      ERRING HIGH, declared (same report, 2026-10-27): in the FIRST piece, `cp item /tmp/x` (the
+    item as SOURCE, a read) already counts as a write. Stripping each piece alone would extend that
+    false ride to later pieces, not create it. The fix for both is cp judged by DESTINATION; `mv`
+    stays as it is, since moving the item away writes its path too.
     """
     nome = d.get("tool_name") or ""
     if nome in ("Edit", "Write", "NotebookEdit"):
@@ -861,6 +864,8 @@ def selftest():
         ("ls backup.sh; echo hi > f", it_bk, False, "write in a segment WITHOUT the item"),
         ("cd /srv && cp a.sh app/backup.sh", it_bk, False,
          "DECLARED low-side miss: verb at the start of a later piece (see escrita_do_item)"),
+        ("cp z/backup.sh /tmp/x", it_bk, True,
+         "DECLARED high-side: the item as SOURCE of cp, a read, counts (see escrita_do_item)"),
     ]:
         checa(f"per-item · {'counts' if esperado else 'does NOT count'}: {porque}",
               escrita_do_item({"tool_name": "Bash", "tool_input": {"command": cmd}}, it) == esperado)
