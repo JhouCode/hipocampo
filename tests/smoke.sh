@@ -111,6 +111,7 @@ st() {  # $1 = label · rest = command (run in the clone, under the fake HOME)
   check "$lab" "$rc" "$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -v '^\s*$' | tail -1 | cut -c1-90)"
 }
 st "mapa-hook.sh --selftest"            bash scripts/mapa-hook.sh --selftest
+st "mapa-orcamento-hook.sh --selftest" bash scripts/mapa-orcamento-hook.sh --selftest
 st "gatilho.py --selftest"              python3 scripts/gatilho.py --selftest
 st "oraculo.py --selftest"              python3 scripts/oraculo.py --selftest
 st "porta.py --selftest"                python3 scripts/porta.py --selftest
