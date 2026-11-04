@@ -112,6 +112,7 @@ st() {  # $1 = label · rest = command (run in the clone, under the fake HOME)
 }
 st "mapa-hook.sh --selftest"            bash scripts/mapa-hook.sh --selftest
 st "mapa-orcamento-hook.sh --selftest" bash scripts/mapa-orcamento-hook.sh --selftest
+st "tarefa-vigia.sh --selftest"        bash scripts/tarefa-vigia.sh --selftest
 st "gatilho.py --selftest"              python3 scripts/gatilho.py --selftest
 st "oraculo.py --selftest"              python3 scripts/oraculo.py --selftest
 st "porta.py --selftest"                python3 scripts/porta.py --selftest

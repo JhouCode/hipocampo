@@ -33,6 +33,11 @@ CACHE = os.environ.get("VIZINHOS_CACHE", os.path.join(HC.STATE_DIR, "vizinhos"))
 TETO_LINHAS = 15
 TETO_COMMITS = 6
 MARCADOS = {"docs/mesa/BASTAO.md": "BATON", "docs/mesa/DESENHO.md": "DESIGN"}
+#   THE TIMER'S BLIND SPOT: the per-task timer (`tarefa-vigia.sh`) lives in the app's process; the app
+# went down, the timer died in silence. This hook runs on every prompt, so it is the one that says a
+# task went unchecked. Its own line ceiling: this is the part that asks for ACTION, it does not give way.
+VIGIA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tarefa-vigia.sh")
+TETO_VIGIA = 3
 
 
 def git(*args):
@@ -49,7 +54,10 @@ def assinatura(sha):
     corpo = git("show", "-s", "--format=%B", sha)
     for linha in corpo.splitlines():
         if linha.lower().startswith("session:"):
-            return "[" + linha.split(":", 1)[1].strip().strip("[]") + "]"
+            #   Only the 1st token: a trailer may carry the session id after the nickname
+            # (`Session: qz local_c6dbcad6`), and the whole value would print the id too.
+            valor = linha.split(":", 1)[1].split()
+            return "[" + (valor[0].strip("[]") if valor else "??") + "]"
     return "[??]"
 
 
@@ -73,15 +81,27 @@ def chave(dados):
     return hashlib.sha1(sid.encode()).hexdigest()[:16]
 
 
-def render(novos, sujo, primeira):
-    if not novos and not sujo:
+def vigia():
+    """Registered tasks whose timer did not check within the window. Failing here stays silent."""
+    if not os.path.exists(VIGIA):
+        return []
+    try:
+        r = subprocess.run(["bash", VIGIA, "pending"], capture_output=True, text=True, timeout=5)
+        return [l for l in r.stdout.splitlines() if l.strip()]
+    except Exception:
+        return []
+
+
+def render(novos, sujo, primeira, parados=()):
+    if not novos and not sujo and not parados:
         return ""
     marcas = [nome for caminho, nome in MARCADOS.items()
               if any(caminho in l for l in sujo) or any(caminho in a for _, _, a in novos)]
     # what is already reserved in the budget: header, the mark, and the label of each section present
     gasto = 1 + (1 if marcas else 0) + (1 if novos else 0) + (1 if sujo else 0)
 
-    linhas = []
+    linhas = list(parados[:TETO_VIGIA])
+    gasto += len(linhas)
     if novos:
         mostra = novos[:TETO_COMMITS]
         sobra = len(novos) - len(mostra)
@@ -119,7 +139,10 @@ def main():
     head, sujo = estado()
     if not head:
         return 0  # not a repo, or git unavailable — staying quiet is right, nothing to announce
-    impressao = head + "|" + hashlib.sha1("\n".join(sujo).encode()).hexdigest()[:12]
+    parados = vigia()
+    #   The dead-timer notice is part of the fingerprint: its age moves in steps, so it repeats at
+    # most once per step while nobody checks — and goes quiet once someone does.
+    impressao = head + "|" + hashlib.sha1("\n".join(sujo + parados).encode()).hexdigest()[:12]
 
     anterior = ""
     try:
@@ -140,7 +163,7 @@ def main():
             sha, _, assunto = l.partition("\t")
             novos.append((sha, assinatura(sha), assunto))
 
-    saida = render(novos, sujo, primeira)
+    saida = render(novos, sujo, primeira, parados)
     try:
         with open(alvo, "w", encoding="utf-8") as f:
             f.write(impressao)
@@ -160,7 +183,8 @@ def _sh(cwd, *args):
 def _chama(repo, cache, sid):
     """Runs the ARTIFACT as a process, with JSON on stdin — which is how the hook is invoked.
     Calling main() by import would measure a re-implementation, not what runs for real."""
-    amb = dict(os.environ, VIZINHOS_REPO=repo, VIZINHOS_CACHE=cache)
+    amb = dict(os.environ, VIZINHOS_REPO=repo, VIZINHOS_CACHE=cache,
+               VIGIA_DIR=os.path.join(os.path.dirname(cache), "vigia"))   # the real registry stays out of the proof
     r = subprocess.run([sys.executable, os.path.abspath(__file__)], input=json.dumps({"session_id": sid}),
                        capture_output=True, text=True, env=amb)
     return r.stdout
@@ -239,6 +263,33 @@ def selftest():
     n6 = len(a6.splitlines())
     caso(f"POS 5 · 12 commits + 25 dirty fit the ceiling of {TETO_LINHAS}", n6 <= TETO_LINHAS,
          f"{n6} line(s), {len(a6)} B")
+
+    # POS 6 — a trailer with the session id after the nickname prints only the nickname
+    open(os.path.join(repo, "local.txt"), "w").write("l\n")
+    _sh(repo, "git", "add", "local.txt")
+    _sh(repo, "git", "commit", "-q", "-m", "new trailer\n\nSession: qz local_c6dbcad6")
+    a7 = _chama(repo, cache, "A")
+    caso("POS 6 · trailer with local_ id prints [qz] only", "[qz] new trailer" in a7,
+         a7.strip().replace("\n", " | ")[:100])
+
+    # POS 7 — a task's timer died with the app: the hook says so, even with the repo still
+    vdir = os.path.join(base, "vigia")
+    amb = dict(os.environ, VIGIA_DIR=vdir)
+    subprocess.run(["bash", VIGIA, "register", "render-x", "local", "-", "/x.log"], env=amb,
+                   capture_output=True, text=True)
+    reg = os.path.join(vdir, "render-x.reg")
+    corpo = open(reg).read().splitlines()
+    velho = str(int(__import__("time").time()) - 3 * 3600)
+    open(reg, "w").write("\n".join(("last_check=" + velho) if l.startswith("last_check=") else l
+                                   for l in corpo) + "\n")
+    a8 = _chama(repo, cache, "A")
+    caso("POS 7 · timer dead for 3 h shows up with the repo still", "⏰ task render-x" in a8,
+         a8.strip().replace("\n", " | ")[:100])
+    a9 = _chama(repo, cache, "A")
+    caso("NEG 4 · the same dead timer on the next prompt = 0 bytes", a9 == "", f"{len(a9)}B")
+    os.remove(reg)
+    a10 = _chama(repo, cache, "A")
+    caso("NEG 5 · checked/closed, the notice goes away", "⏰" not in a10, a10.strip()[:80])
 
     print("CONTROLS OF THE NEIGHBOUR NOTICE")
     for rotulo, ok, detalhe in casos:

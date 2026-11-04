@@ -136,7 +136,18 @@ Also here, used by the pieces above: `scripts/memoria_ids.py`, `memoria-resolve.
 `contexto-medir.py`, `contexto-consumo.py`, `memoria-recall.py` (the measuring instruments),
 `janela-teto.py`, `horizonte.py` (window and horizon warnings), `guarda-ja-existe.py` ("does this
 rule already exist?"), `guarda-crase.py` (backticks in heredocs), `vizinhos-hook.py` (dirty files
-that are not yours).
+that are not yours, and long tasks whose timer died).
+
+**Long tasks get a timer: `tarefa-vigia.sh`.** The harness wakes a session only when a background
+process ends, and a stuck task never ends: its silence looks exactly like work. The session that
+launches a long task registers it (`run` wraps a command; `register` takes a PID and log that
+already exist, local or over ssh) and arms `tarefa-vigia.sh timer NAME` in the background. The timer
+is a clock that ends, not a loop; when it ends, the session wakes with a verdict taken from the
+target itself (exact PID, the log's mark, CPU of the process tree): MOVING, QUIET-WORKING, STUCK,
+DEAD-NO-CLOSE, STOPPED, FINISHED or NO-SIGNAL. The window is per task, by time (`--window 1h`, the
+default) or by cycle (`--cycle REGEX`: only a new cycle line counts as progress, and the window
+becomes a factor of the average cycle seen in use). If the app goes down, the timer dies with it;
+`vizinhos-hook.py` then reports the task as unchecked on the next prompt.
 
 ## The order
 
