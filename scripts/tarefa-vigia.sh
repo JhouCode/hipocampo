@@ -77,7 +77,7 @@ _load() {   # loads the record into R_<field>
 
 _save() {   # rewrites the record from R_* (atomic: copy and mv)
   local f; f=$(_reg "$R_name")
-  { for k in name host pid log close cpu window cycle factor created last_check cpu_last cycles_last mark_last; do
+  { for k in name host pid log close cpu window cycle factor created last_check cpu_last cycles_last cycles_base mark_last; do
       local var="R_$k"; printf '%s=%s\n' "$k" "${!var-}"; done; } > "$f.new" && mv "$f.new" "$f"
 }
 
@@ -151,6 +151,9 @@ register() {   # NAME HOST PID LOG [options]
   local s; if s=$(_probe "$host" "$pid" "$log" "$R_close" "$R_cycle"); then
     read -r _ R_cpu_last _ _ _ R_cycles_last R_mark_last <<<"$s"
   fi
+  #   the per-cycle average counts NEW cycles only: a task registered mid-run already has cycles in its log
+  #   (11 old cycles ÷ 1 s since registration = 0 → the 300 s floor, on a run of hours per file)
+  R_cycles_base=$R_cycles_last
   _save
   echo "registered: $name @$host pid $pid · window $(next "$name")s$( [ -n "$R_cycle" ] && echo " · by cycle /$R_cycle/ ×$R_factor")"
 }
@@ -158,8 +161,9 @@ register() {   # NAME HOST PID LOG [options]
 next() {   # the CURRENT window: time, or factor × the average cycle measured in use
   _load "$1" || return 1
   local w="$R_window"
-  if [ -n "$R_cycle" ] && [ "${R_cycles_last:-0}" -ge 2 ]; then
-    local avg=$(( (R_last_check - R_created) / R_cycles_last ))
+  local new=$(( ${R_cycles_last:-0} - ${R_cycles_base:-0} ))
+  if [ -n "$R_cycle" ] && [ "$new" -ge 2 ]; then
+    local avg=$(( (R_last_check - R_created) / new ))
     w=$(( avg * R_factor ))
     [ "$w" -lt "$VIGIA_MIN" ] && w=$VIGIA_MIN
     [ "$w" -gt "$R_window" ] && w=$R_window
@@ -347,6 +351,14 @@ _selftest() {
   _case "before 2 cycles --window applies (2h = 7200)" "7200" "$(bash "$me" next t7)"
   sed -i "s/^cycles_last=.*/cycles_last=600/" "$f7"
   _case "a 2 s cycle does not become a 6 s timer: floor (60)" "60" "$(bash "$me" next t7)"
+  # 7c · registered MID-RUN: cycles from before the registration do not enter the average
+  for i in $(seq 1 10); do echo "CM file$i done"; done > "$tmp/t7c.log"
+  _case "register shows the --window, not the floor" "registered: t7c @local pid - · window 21600s" \
+    "$(bash "$me" register t7c local - "$tmp/t7c.log" --cycle '^CM .* done' --window 6h)"
+  _case "10 old cycles, 0 new → next = --window (6h = 21600)" "21600" "$(bash "$me" next t7c)"
+  local f7c; f7c=$(_reg t7c)
+  sed -i "s/^created=.*/created=$(( nw - 1200 ))/; s/^last_check=.*/last_check=$nw/; s/^cycles_last=.*/cycles_last=14/" "$f7c"
+  _case "4 NEW cycles in 1200 s × factor 3 → 900 (base of 10 discounted)" "900" "$(bash "$me" next t7c)"
   bash "$me" register t7b local - "$tmp/t7.log" --window 30m >/dev/null
   _case "by time, --window 30m → 1800" "1800" "$(bash "$me" next t7b)"
 
