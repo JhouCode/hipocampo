@@ -11,7 +11,7 @@
 # can get stuck watching itself; it happened, and cost 7 hours). When it ends, the process exit
 # wakes the session with the verdict in its output; the session re-arms or reports. The check asks
 # the target by EXACT PID (a match by name once matched itself), by the log on disk, and by the CPU
-# of the process TREE (the waiting parent is ~0; the work lives in the children).
+# of the process TREE, dead children included (the waiting parent is ~0; the work lives in the children).
 #
 # THE TIMER DOES NOT HANG AROUND. A blind clock that sleeps the whole window piles up: one session
 # showed 7 timers "running", 5 of them watching jobs that had already finished; asking the session to
@@ -94,7 +94,7 @@ if [ "$p" != - ]; then
     alive=1
     hz=$(getconf CLK_TCK 2>/dev/null || echo 100)
     cpu=$(cat /proc/[0-9]*/stat 2>/dev/null | awk -v r="$p" -v hz="$hz" '
-      { pid=$1; s=$0; sub(/^.*\) /, "", s); split(s, f, " "); pp[pid]=f[2]; t[pid]=f[12]+f[13] }
+      { pid=$1; s=$0; sub(/^.*\) /, "", s); split(s, f, " "); pp[pid]=f[2]; t[pid]=f[12]+f[13]+f[14]+f[15] }
       END { in_[r]=1; changed=1
             while (changed) { changed=0; for (k in pp) if (!(k in in_) && (pp[k] in in_)) { in_[k]=1; changed=1 } }
             sum=0; for (k in in_) sum+=t[k]; printf "%d\n", sum*100/hz }')
@@ -318,6 +318,15 @@ _selftest() {
   _case "sleeping with --cpu → STUCK (no CPU, the flag does not save it)" "STUCK" "$(bash "$me" check t5n)"
   kill "$p5" 2>/dev/null
 
+
+  # 5b · --cpu counts a child that has ALREADY died: a reaped child's CPU moves to the parent's cutime/cstime
+  #      (a test runner whose test binaries live ~1 min each read as ~0 CPU when only the living were summed)
+  : > "$tmp/t5b.log"; touch -d '-10 min' "$tmp/t5b.log"
+  ( for i in $(seq 1 14); do timeout 0.2 sh -c 'while :; do :; done'; sleep 0.05; done; exec sleep 300 ) & local p5b=$!
+  bash "$me" register t5b local "$p5b" "$tmp/t5b.log" --cpu >/dev/null
+  sleep 3.8
+  _case "--cpu with short children that already died → QUIET-WORKING" "QUIET-WORKING" "$(bash "$me" check t5b)"
+  kill "$p5b" 2>/dev/null
   # 6 · by CYCLE: a log that only repeats 'waiting' is NOT progress; a cycle line is
   ( while :; do echo "waiting…"; sleep 0.2; done ) >>"$tmp/t6.log" & local p6=$!
   bash "$me" register t6 local "$p6" "$tmp/t6.log" --cycle '^CYCLE' >/dev/null
