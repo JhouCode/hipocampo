@@ -146,7 +146,10 @@ is a clock that ends, not a loop; when it ends, the session wakes with a verdict
 target itself (exact PID, the log's mark, CPU of the process tree): MOVING, QUIET-WORKING, STUCK,
 DEAD-NO-CLOSE, STOPPED, FINISHED or NO-SIGNAL. The window is per task, by time (`--window 1h`, the
 default) or by cycle (`--cycle REGEX`: only a new cycle line counts as progress, and the window
-becomes a factor of the average cycle seen in use). If the app goes down, the timer dies with it;
+becomes a factor of the average cycle seen in use). The timer does not hang around after its job:
+it peeks at the target every 30 s and ends as soon as the job closes (close line, PID gone, or a
+Claude Code worker marked finished), and re-arming or `close NAME` makes the old one step aside.
+If the app goes down, the timer dies with it;
 `vizinhos-hook.py` then reports the task as unchecked on the next prompt.
 
 ## The order

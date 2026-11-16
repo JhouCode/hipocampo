@@ -13,6 +13,16 @@
 # the target by EXACT PID (a match by name once matched itself), by the log on disk, and by the CPU
 # of the process TREE (the waiting parent is ~0; the work lives in the children).
 #
+# THE TIMER DOES NOT HANG AROUND. A blind clock that sleeps the whole window piles up: one session
+# showed 7 timers "running", 5 of them watching jobs that had already finished; asking the session to
+# disarm them did not hold. So the exits belong to the timer itself:
+#   · the TARGET closed (close line in the log, PID gone, Claude Code worker with `"finished": true`
+#     in its meta.json) → it checks right away and ends: the session wakes with FINISHED;
+#   · the same NAME was RE-ARMED → the pidfile NAME.timer passes to the new one; the old one leaves;
+#   · `close NAME` removed the record → the timer leaves at its next step.
+#   Nobody kills anybody by name: each timer reads the pidfile and steps aside on its own.
+#   Peek interval: VIGIA_STEP (30 s, local) · VIGIA_STEP_REMOTE (120 s, over ssh).
+#
 # THE WINDOW IS MODULAR (per task, at registration):
 #   time  — `--window 1h` (default 1 h): moved = the log was written since the last check.
 #   cycle — `--cycle REGEX [--factor 3]`: moved = a NEW cycle line appeared (a log that only repeats
@@ -25,7 +35,7 @@
 # Usage:
 #   tarefa-vigia.sh run      NAME LOG [options] -- CMD…   # wrapper: registers, runs, writes CLOSE rc=N
 #   tarefa-vigia.sh register NAME HOST PID|- LOG [options] # a task already launched (by a worker, over ssh…)
-#   tarefa-vigia.sh timer    NAME [SEC]  # in the background; sleeps the task's window, then checks
+#   tarefa-vigia.sh timer    NAME [SEC]  # in the background; waits the window OR the target closing, then checks
 #   tarefa-vigia.sh check    NAME        # verdict; rc 0 moving · 10 finished · 20 stuck ·
 #                                        #   21 dead without close · 22 stopped (no PID) · 2 no signal
 #   tarefa-vigia.sh next     NAME        # how many seconds the next timer should sleep
@@ -38,6 +48,9 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/hipo-config.sh"
 
 VIGIA_DIR="${VIGIA_DIR:-$HIPO_STATE_DIR/tarefa-vigia}"  # not /tmp: systemd's `D /tmp` wipes it at boot
+VIGIA_STEP="${VIGIA_STEP:-30}"                 # the timer peeks at the target every step (local: free)
+VIGIA_STEP_REMOTE="${VIGIA_STEP_REMOTE:-120}"  # target over ssh: one ssh every 2 min
+VIGIA_LOCAL_HOSTS="${VIGIA_LOCAL_HOSTS:-local}"  # names that mean THIS host (probed without ssh)
 VIGIA_MIN="${VIGIA_MIN:-300}"          # floor of the cycle window: a cycle of seconds is not a timer of seconds
 VIGIA_CPU_MIN_CS="${VIGIA_CPU_MIN_CS:-200}"  # hundredths of CPU in the window for `--cpu` to count as progress
 VIGIA_WIN_HOSTS="${VIGIA_WIN_HOSTS:-}"
@@ -90,14 +103,19 @@ fi
 mt=$(stat -c %Y "$log" 2>/dev/null || echo 0)
 mk=$(stat -c %y "$log" 2>/dev/null | tr " " _); mk=${mk:-absent}
 cl=0; tail -n 50 "$log" 2>/dev/null | grep -Eq "$cre" && cl=1
+#   Claude Code worker (Agent): the log is tasks/<id>.output -> subagents/agent-<id>.jsonl; the harness marks the end in meta.json
+r=$(readlink -f "$log" 2>/dev/null); case "$r" in */subagents/agent-*.jsonl)
+  grep -q '"finished": *true' "${r%.jsonl}.meta.json" 2>/dev/null && cl=1 ;; esac
 cy=0; [ -n "$yre" ] && cy=$(grep -cE "$yre" "$log" 2>/dev/null); cy=${cy:-0}
 echo "$alive ${cpu:-0} $mt $(date +%s) $cl $cy $mk"
 EOF
 
+_is_local() { [[ " $VIGIA_LOCAL_HOSTS " == *" $1 "* ]]; }
+
 _probe() {   # host pid log close cycle
   local host="$1"; shift
   local body; body="$(printf 'set -- %q %q %q %q\n' "$@")"$'\n'"$_PROBE"
-  if [ "$host" = local ]; then printf '%s\n' "$body" | bash -s
+  if _is_local "$host"; then printf '%s\n' "$body" | bash -s
   elif [[ " $VIGIA_WIN_HOSTS " == *" $host "* ]]; then
     printf '%s\n' "$body" | timeout 30 ssh -o ConnectTimeout=8 -o BatchMode=yes "$host" "\"$VIGIA_GITBASH\" -s" 2>/dev/null
   else printf '%s\n' "$body" | timeout 30 ssh -o ConnectTimeout=8 -o BatchMode=yes "$host" bash -s 2>/dev/null
@@ -124,6 +142,8 @@ register() {   # NAME HOST PID LOG [options]
   _name_ok "$1" || return 1
   local name="$1" host="$2" pid="$3" log="$4"; shift 4
   [[ "$pid" == - || "$pid" =~ ^[0-9]+$ ]] || { echo "invalid PID: $pid" >&2; return 1; }
+  #   a relative log of a local task becomes absolute: the timer runs from another directory
+  _is_local "$host" && [[ "$log" != /* ]] && log="$PWD/$log"
   _options "$@" || return 1
   mkdir -p "$VIGIA_DIR"
   R_name=$name R_host=$host R_pid=$pid R_log=$log
@@ -170,7 +190,7 @@ check() {
   local v rc
   if [ "$cl" = 1 ]; then
     v="FINISHED · $det"; rc=10
-    [ "$R_host" = local ] && v="$v · $(tail -n 50 "$R_log" 2>/dev/null | grep -E "$R_close" | tail -1)"
+    _is_local "$R_host" && v="$v · $(tail -n 50 "$R_log" 2>/dev/null | grep -E "$R_close" | tail -1 | cut -c1-200)"
   elif [ "$alive" = 0 ]; then v="DEAD-NO-CLOSE · $det · the process is gone and the log has no close line"; rc=21
   elif [ "$moved" = 1 ]; then v="MOVING · $det"; rc=0
   elif [ "$alive" = 1 ] && [ "$R_cpu" = 1 ] && [ "$dcpu" -ge "$VIGIA_CPU_MIN_CS" ]; then
@@ -186,12 +206,22 @@ check() {
   return "$rc"
 }
 
-timer() {   # sleeps the window (or SEC) and checks — the END of this process is what wakes the session
+timer() {   # waits the window (or SEC) or the target closing, then checks — the END of this process wakes the session
   _load "$1" || return 1
-  local sec="${2:-$(next "$1")}"
-  sleep "$sec"
-  [ -f "$(_reg "$1")" ] || { echo "CLOSED · $1 had already left the registry"; return 0; }
-  check "$1"
+  local name="$1" sec="${2:-$(next "$1")}" pf="$VIGIA_DIR/$1.timer"
+  echo $$ > "$pf"                       # the current timer is the one in the pidfile; the previous one steps aside
+  local step=$VIGIA_STEP; _is_local "$R_host" || step=$VIGIA_STEP_REMOTE
+  local end=$(( $(date +%s) + sec )) now s alive cl
+  while now=$(date +%s); [ "$now" -lt "$end" ]; do
+    sleep $(( end - now < step ? end - now : step ))
+    [ -f "$(_reg "$name")" ] || { echo "CLOSED · $name left the registry (close, or another check said FINISHED)"; return 0; }
+    [ "$(cat "$pf" 2>/dev/null)" = $$ ] || { echo "REPLACED · $name was re-armed; this timer steps aside"; return 0; }
+    s=$(_probe "$R_host" "$R_pid" "$R_log" "$R_close" "$R_cycle") || continue
+    read -r alive _ _ _ cl _ _ <<<"$s"
+    [ "$cl" = 1 ] || [ "$alive" = 0 ] && break          # the target closed: check now, not an hour from now
+  done
+  [ "$(cat "$pf" 2>/dev/null)" = $$ ] && rm -f "$pf"
+  check "$name"
 }
 
 run() {   # NAME LOG [options] -- CMD…  — registers ITSELF and writes the close line with the rc
@@ -233,14 +263,14 @@ list() {
   done
 }
 
-close() { _name_ok "$1" || return 1; rm -f "$(_reg "$1")" && echo "closed: $1"; }
+close() { _name_ok "$1" || return 1; rm -f "$(_reg "$1")" && echo "closed: $1 (its timer leaves at the next step)"; }
 
 # --------------------------------------------------------------------------- selftest
 _selftest() {
   local tmp ok=0 bad=0
   tmp=$(mktemp -d); trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$tmp"' RETURN
   export VIGIA_DIR="$tmp/reg" VIGIA_CPU_MIN_CS=50 VIGIA_MIN=60
-  local me="$0"
+  local me; me=$(readlink -f "$0")   # absolute: one case runs from another directory
   _case() {   # label · expected (prefix of the verdict) · output
     if [[ "$3" == "$2"* ]]; then ok=$((ok+1)); echo "  ✓ $1"
     else bad=$((bad+1)); echo "  ✗ $1"; echo "      expected '$2', got: ${3:0:150}"; fi
@@ -342,6 +372,41 @@ _selftest() {
   wait "$p13"; local r13=$?
   _case "script edited mid-timer: verdict and rc intact" "STUCK rc=20" \
     "$(head -c 5 "$tmp/t13.out") rc=$r13$(grep -E 'command not found|syntax error' "$tmp/t13.out" | head -1)"
+
+  # 14 · THE TIMER DOES NOT HANG AROUND: the job closes → the timer ends with it, not an hour later
+  export VIGIA_STEP=1
+  : > "$tmp/t14.log"; sleep 300 & local p14=$!
+  bash "$me" register t14 local "$p14" "$tmp/t14.log" >/dev/null
+  ( sleep 1.5; echo "CLOSE rc=0 x" >>"$tmp/t14.log" ) &
+  local t0=$SECONDS out14; out14=$(bash "$me" timer t14 60)
+  _case "close line → a 60 s timer ends in ≤ 4 s with FINISHED" "FINISHED ok" "${out14:0:8} $( [ $((SECONDS - t0)) -le 4 ] && echo ok || echo "took $((SECONDS - t0))s")"
+  kill "$p14" 2>/dev/null
+  : > "$tmp/t15.log"; sleep 300 & local p15=$!
+  bash "$me" register t15 local "$p15" "$tmp/t15.log" >/dev/null
+  ( sleep 1.5; kill "$p15" ) &
+  t0=$SECONDS; local out15; out15=$(bash "$me" timer t15 60)
+  _case "PID gone → the timer ends in ≤ 4 s with DEAD-NO-CLOSE" "DEAD-NO-CLOSE ok" "${out15:0:13} $( [ $((SECONDS - t0)) -le 4 ] && echo ok || echo "took")"
+  # Claude Code worker: tasks/<id>.output -> subagents/agent-<id>.jsonl + meta.json "finished": true
+  mkdir -p "$tmp/subagents" "$tmp/tasks"; echo '{"type":"assistant"}' > "$tmp/subagents/agent-x1.jsonl"
+  echo '{"agentType":"worker","finished":false}' > "$tmp/subagents/agent-x1.meta.json"
+  ln -s "$tmp/subagents/agent-x1.jsonl" "$tmp/tasks/x1.output"
+  bash "$me" register t16 local - "$tmp/tasks/x1.output" >/dev/null
+  ( sleep 1.5; echo '{"agentType":"worker","finished":true}' > "$tmp/subagents/agent-x1.meta.json" ) &
+  t0=$SECONDS; local out16; out16=$(bash "$me" timer t16 60)
+  _case "worker with finished:true → the timer ends in ≤ 4 s with FINISHED" "FINISHED ok" "${out16:0:8} $( [ $((SECONDS - t0)) -le 4 ] && echo ok || echo "took")"
+  # re-arming the same name: the old one steps aside; close: the timer leaves
+  : > "$tmp/t17.log"; sleep 300 & local p17=$!
+  bash "$me" register t17 local "$p17" "$tmp/t17.log" >/dev/null
+  bash "$me" timer t17 60 >"$tmp/t17a.out" & local a17=$!; sleep 1.2
+  bash "$me" timer t17 60 >"$tmp/t17b.out" & local b17=$!
+  t0=$SECONDS; wait "$a17"
+  _case "re-armed: the old timer steps aside in ≤ 3 s" "REPLACED ok" "$(cut -d" " -f1 "$tmp/t17a.out") $( [ $((SECONDS - t0)) -le 3 ] && echo ok || echo took)"
+  bash "$me" close t17 >/dev/null; t0=$SECONDS; wait "$b17"
+  _case "close: the current timer leaves in ≤ 3 s" "CLOSED ok" "$(cut -d" " -f1 "$tmp/t17b.out") $( [ $((SECONDS - t0)) -le 3 ] && echo ok || echo took)"
+  kill "$p17" 2>/dev/null
+  # a relative log of a local task becomes absolute
+  ( cd "$tmp" && bash "$me" register t18 local - rel.log >/dev/null )
+  _case "relative log becomes absolute in the record" "log=$tmp/rel.log" "$(grep '^log=' "$(_reg t18)")"
 
   kill "$p2" "$p3" 2>/dev/null
   echo "== $ok ok · $bad failure(s)"
